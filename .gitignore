@@ -1,0 +1,12 @@
+/local-runtime/
+/.env
+**/node_modules/
+**/target/
+**/__pycache__/
+*.log
+*.sqlite*
+*.gguf
+*.onnx
+credentials.json
+实训演示账号.json
+系统账号密码.txt

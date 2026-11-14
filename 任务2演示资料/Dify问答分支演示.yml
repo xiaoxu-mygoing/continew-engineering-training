@@ -1,0 +1,450 @@
+{
+  "app": {
+    "name": "私人资料问答分支演示",
+    "description": "输入工作台显示的两个计数，复现本次问答的处理分支。",
+    "mode": "workflow",
+    "icon": "📚",
+    "icon_background": "#E0F2FE",
+    "use_icon_as_answer_icon": false
+  },
+  "kind": "app",
+  "version": "0.3.0",
+  "dependencies": [],
+  "workflow": {
+    "environment_variables": [],
+    "conversation_variables": [],
+    "features": {
+      "file_upload": {
+        "enabled": false
+      },
+      "opening_statement": "",
+      "suggested_questions": [],
+      "retriever_resource": {
+        "enabled": false
+      },
+      "sensitive_word_avoidance": {
+        "enabled": false
+      },
+      "speech_to_text": {
+        "enabled": false
+      },
+      "text_to_speech": {
+        "enabled": false
+      }
+    },
+    "graph": {
+      "nodes": [
+        {
+          "id": "100",
+          "type": "custom",
+          "position": {
+            "x": 0,
+            "y": 125
+          },
+          "positionAbsolute": {
+            "x": 0,
+            "y": 125
+          },
+          "width": 244,
+          "height": 100,
+          "sourcePosition": "right",
+          "targetPosition": "left",
+          "data": {
+            "type": "start",
+            "title": "输入本次检索统计",
+            "desc": "",
+            "selected": false,
+            "variables": [
+              {
+                "variable": "candidates",
+                "label": "候选片段数",
+                "type": "number",
+                "required": true,
+                "options": []
+              },
+              {
+                "variable": "citations",
+                "label": "通过核验的引用数",
+                "type": "number",
+                "required": true,
+                "options": []
+              }
+            ]
+          }
+        },
+        {
+          "id": "200",
+          "type": "custom",
+          "position": {
+            "x": 300,
+            "y": 125
+          },
+          "positionAbsolute": {
+            "x": 300,
+            "y": 125
+          },
+          "width": 244,
+          "height": 100,
+          "sourcePosition": "right",
+          "targetPosition": "left",
+          "data": {
+            "type": "if-else",
+            "title": "检索到相关片段？",
+            "desc": "",
+            "selected": false,
+            "cases": [
+              {
+                "case_id": "true",
+                "logical_operator": "and",
+                "conditions": [
+                  {
+                    "id": "condition-candidates",
+                    "variable_selector": [
+                      "100",
+                      "candidates"
+                    ],
+                    "varType": "number",
+                    "comparison_operator": ">",
+                    "value": "0"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "300",
+          "type": "custom",
+          "position": {
+            "x": 600,
+            "y": 0
+          },
+          "positionAbsolute": {
+            "x": 600,
+            "y": 0
+          },
+          "width": 244,
+          "height": 100,
+          "sourcePosition": "right",
+          "targetPosition": "left",
+          "data": {
+            "type": "if-else",
+            "title": "引用核验通过？",
+            "desc": "",
+            "selected": false,
+            "cases": [
+              {
+                "case_id": "true",
+                "logical_operator": "and",
+                "conditions": [
+                  {
+                    "id": "condition-citations",
+                    "variable_selector": [
+                      "100",
+                      "citations"
+                    ],
+                    "varType": "number",
+                    "comparison_operator": ">",
+                    "value": "0"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "400",
+          "type": "custom",
+          "position": {
+            "x": 900,
+            "y": 360
+          },
+          "positionAbsolute": {
+            "x": 900,
+            "y": 360
+          },
+          "width": 244,
+          "height": 100,
+          "sourcePosition": "right",
+          "targetPosition": "left",
+          "data": {
+            "type": "template-transform",
+            "title": "调整检索词",
+            "desc": "",
+            "selected": false,
+            "variables": [],
+            "template": "没有匹配的段落，请改用资料中的设备名或编号。"
+          }
+        },
+        {
+          "id": "500",
+          "type": "custom",
+          "position": {
+            "x": 1200,
+            "y": 360
+          },
+          "positionAbsolute": {
+            "x": 1200,
+            "y": 360
+          },
+          "width": 244,
+          "height": 100,
+          "sourcePosition": "right",
+          "targetPosition": "left",
+          "data": {
+            "type": "end",
+            "title": "输出处理建议",
+            "desc": "",
+            "selected": false,
+            "outputs": [
+              {
+                "variable": "guidance",
+                "value_selector": [
+                  "400",
+                  "output"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "401",
+          "type": "custom",
+          "position": {
+            "x": 900,
+            "y": 180
+          },
+          "positionAbsolute": {
+            "x": 900,
+            "y": 180
+          },
+          "width": 244,
+          "height": 100,
+          "sourcePosition": "right",
+          "targetPosition": "left",
+          "data": {
+            "type": "template-transform",
+            "title": "补充资料",
+            "desc": "",
+            "selected": false,
+            "variables": [],
+            "template": "已有相关段落，仍缺少能核实答案的原文。请补充对应资料。"
+          }
+        },
+        {
+          "id": "501",
+          "type": "custom",
+          "position": {
+            "x": 1200,
+            "y": 180
+          },
+          "positionAbsolute": {
+            "x": 1200,
+            "y": 180
+          },
+          "width": 244,
+          "height": 100,
+          "sourcePosition": "right",
+          "targetPosition": "left",
+          "data": {
+            "type": "end",
+            "title": "输出处理建议",
+            "desc": "",
+            "selected": false,
+            "outputs": [
+              {
+                "variable": "guidance",
+                "value_selector": [
+                  "401",
+                  "output"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": "402",
+          "type": "custom",
+          "position": {
+            "x": 900,
+            "y": 0
+          },
+          "positionAbsolute": {
+            "x": 900,
+            "y": 0
+          },
+          "width": 244,
+          "height": 100,
+          "sourcePosition": "right",
+          "targetPosition": "left",
+          "data": {
+            "type": "template-transform",
+            "title": "提供引用",
+            "desc": "",
+            "selected": false,
+            "variables": [],
+            "template": "已取得可核验的引用，请在工作台对照答案和原文。"
+          }
+        },
+        {
+          "id": "502",
+          "type": "custom",
+          "position": {
+            "x": 1200,
+            "y": 0
+          },
+          "positionAbsolute": {
+            "x": 1200,
+            "y": 0
+          },
+          "width": 244,
+          "height": 100,
+          "sourcePosition": "right",
+          "targetPosition": "left",
+          "data": {
+            "type": "end",
+            "title": "输出处理建议",
+            "desc": "",
+            "selected": false,
+            "outputs": [
+              {
+                "variable": "guidance",
+                "value_selector": [
+                  "402",
+                  "output"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "100-source-200",
+          "type": "custom",
+          "source": "100",
+          "sourceHandle": "source",
+          "target": "200",
+          "targetHandle": "target",
+          "data": {
+            "sourceType": "start",
+            "targetType": "if-else",
+            "isInIteration": false,
+            "isInLoop": false
+          },
+          "zIndex": 0
+        },
+        {
+          "id": "200-true-300",
+          "type": "custom",
+          "source": "200",
+          "sourceHandle": "true",
+          "target": "300",
+          "targetHandle": "target",
+          "data": {
+            "sourceType": "if-else",
+            "targetType": "if-else",
+            "isInIteration": false,
+            "isInLoop": false
+          },
+          "zIndex": 0
+        },
+        {
+          "id": "200-false-400",
+          "type": "custom",
+          "source": "200",
+          "sourceHandle": "false",
+          "target": "400",
+          "targetHandle": "target",
+          "data": {
+            "sourceType": "if-else",
+            "targetType": "template-transform",
+            "isInIteration": false,
+            "isInLoop": false
+          },
+          "zIndex": 0
+        },
+        {
+          "id": "400-source-500",
+          "type": "custom",
+          "source": "400",
+          "sourceHandle": "source",
+          "target": "500",
+          "targetHandle": "target",
+          "data": {
+            "sourceType": "template-transform",
+            "targetType": "end",
+            "isInIteration": false,
+            "isInLoop": false
+          },
+          "zIndex": 0
+        },
+        {
+          "id": "300-false-401",
+          "type": "custom",
+          "source": "300",
+          "sourceHandle": "false",
+          "target": "401",
+          "targetHandle": "target",
+          "data": {
+            "sourceType": "if-else",
+            "targetType": "template-transform",
+            "isInIteration": false,
+            "isInLoop": false
+          },
+          "zIndex": 0
+        },
+        {
+          "id": "401-source-501",
+          "type": "custom",
+          "source": "401",
+          "sourceHandle": "source",
+          "target": "501",
+          "targetHandle": "target",
+          "data": {
+            "sourceType": "template-transform",
+            "targetType": "end",
+            "isInIteration": false,
+            "isInLoop": false
+          },
+          "zIndex": 0
+        },
+        {
+          "id": "300-true-402",
+          "type": "custom",
+          "source": "300",
+          "sourceHandle": "true",
+          "target": "402",
+          "targetHandle": "target",
+          "data": {
+            "sourceType": "if-else",
+            "targetType": "template-transform",
+            "isInIteration": false,
+            "isInLoop": false
+          },
+          "zIndex": 0
+        },
+        {
+          "id": "402-source-502",
+          "type": "custom",
+          "source": "402",
+          "sourceHandle": "source",
+          "target": "502",
+          "targetHandle": "target",
+          "data": {
+            "sourceType": "template-transform",
+            "targetType": "end",
+            "isInIteration": false,
+            "isInLoop": false
+          },
+          "zIndex": 0
+        }
+      ],
+      "viewport": {
+        "x": 0,
+        "y": 0,
+        "zoom": 0.65
+      }
+    }
+  }
+}

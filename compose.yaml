@@ -1,0 +1,31 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: continew_admin
+      MYSQL_USER: training
+      MYSQL_PASSWORD: ${DB_PWD:?}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    ports:
+      - "127.0.0.1:13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -utraining continew_admin -e 'SELECT 1'"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PWD: ${REDIS_PWD:?}
+    command: ["redis-server", "--requirepass", "${REDIS_PWD:?}"]
+    ports:
+      - "127.0.0.1:16379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PWD redis-cli ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+volumes:
+  mysql-data:
