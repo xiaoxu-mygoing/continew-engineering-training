@@ -1,4 +1,4 @@
-param([switch]$Native,[switch]$Build,[switch]$Face,[switch]$Rag)
+﻿param([switch]$Native,[switch]$Build,[switch]$Face,[switch]$Rag,[switch]$Graph)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $rt = Join-Path $PSScriptRoot 'local-runtime'
@@ -29,14 +29,20 @@ if (!$Native) {
 if ($Face) { & "$api/training-face/Setup-Face.ps1" }
 $env:TRAINING_RAG_HOME="$rt/rag"
 $env:TRAINING_RAG_PYTHON="$rt/rag/venv/Scripts/python.exe"
-if ($Rag) {
+if ($Rag -or $Graph) {
     if (!(Test-Path $env:TRAINING_RAG_PYTHON)) { py -m venv "$rt/rag/venv"; CheckExit 'Python venv' }
     & $env:TRAINING_RAG_PYTHON -m pip install -r "$api/training-rag/requirements.txt"; CheckExit 'RAG packages'
     foreach ($model in 'qwen3-embedding:0.6b','qwen2.5:3b') { ollama pull $model; CheckExit 'Ollama model' }
 }
+if ($Graph -or (Test-Path "$rt/neo4j/credentials.json")) {
+    & "$PSScriptRoot/Setup-Graph.ps1"
+    $env:TRAINING_GRAPH_HOME="$rt/graph"
+    $env:TRAINING_GRAPH_PYTHON=$env:TRAINING_RAG_PYTHON
+    $env:TRAINING_GRAPH_WORKER="$api/training-graph/worker.py"
+}
 if ($Build -or !(Test-Path $jar)) {
     Push-Location $api
-    try { & .\mvnw.cmd -DskipTests package; CheckExit 'Maven build' } finally { Pop-Location }
+    try { & .\mvnw.cmd -DskipTests -P fat-jar package; CheckExit 'Maven build' } finally { Pop-Location }
 }
 if ($Build -or !(Test-Path "$ui/node_modules/vite/bin/vite.js")) {
     Push-Location $ui

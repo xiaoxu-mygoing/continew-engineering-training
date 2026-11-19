@@ -63,17 +63,30 @@ public class TrainingDocumentService {
     }
 
     void discardIndex(String id, int version) {
-        if (!ragHome.isBlank() && id.matches("[0-9a-f-]{36}")) {
-            try {
-                Files.deleteIfExists(Path.of(ragHome, "index", id + "-v" + version + ".sqlite3"));
-            } catch (IOException e) {
-                log.warn("旧版资料索引暂时无法清理");
-            }
+        discard(ragHome, "index", id, version, "索引");
+    }
+
+    void discardGraph(String id, int version) {
+        jdbc.update("INSERT INTO training_graph_cleanup (document_id, version) VALUES (?, ?)", id,
+            version);
+    }
+
+    private void discard(String home, String dir, String id, int version, String label) {
+        if (home.isBlank() || !id.matches("[0-9a-f-]{36}")) {
+            return;
+        }
+        Path file = dir.isBlank() ? Path.of(home, id + "-v" + version + ".sqlite3")
+            : Path.of(home, dir, id + "-v" + version + ".sqlite3");
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            log.warn("旧版资料{}暂时无法清理", label);
         }
     }
 
     public record DocumentInfo(String documentId, int version, String fileName, int fileSize,
-        LocalDateTime updatedAt, String indexState, String indexError) {
+        LocalDateTime updatedAt, String indexState, String indexError, String graphState,
+        String graphError) {
     }
 
     /**
@@ -83,12 +96,14 @@ public class TrainingDocumentService {
      */
     public List<DocumentInfo> list() {
         return jdbc.query(
-            "SELECT id, version, file_name, file_size, updated_at, index_state, index_error FROM training_document"
-                + SCOPE + " ORDER BY updated_at DESC, id",
+            "SELECT id, version, file_name, file_size, updated_at, index_state, index_error,"
+                + " graph_state, graph_error FROM training_document" + SCOPE
+                + " ORDER BY updated_at DESC, id",
             (row, index) -> new DocumentInfo(row.getString("id"), row.getInt("version"),
                 row.getString("file_name"), row.getInt("file_size"),
                 row.getTimestamp("updated_at").toLocalDateTime(), row.getString("index_state"),
-                row.getString("index_error")),
+                row.getString("index_error"), row.getString("graph_state"),
+                row.getString("graph_error")),
             tenantId(), StpUtil.getLoginIdAsLong());
     }
 
@@ -118,16 +133,18 @@ public class TrainingDocumentService {
      * @param file 新文件
      * @throws IOException 文件读取失败
      */
+    @org.springframework.transaction.annotation.Transactional
     public void replace(String id, int version, MultipartFile file) throws IOException {
         String name = validateFile(file);
         int count = jdbc.update(
             "UPDATE training_document SET file_name = ?, file_size = ?, file_content = ?,"
-                + " index_state = 'pending', index_error = NULL, version = version + 1, updated_at = CURRENT_TIMESTAMP"
-                + CURRENT_DOCUMENT,
+                + " index_state = 'pending', index_error = NULL, graph_state = 'pending', graph_error = NULL,"
+                + " version = version + 1, updated_at = CURRENT_TIMESTAMP" + CURRENT_DOCUMENT,
             name, file.getSize(), file.getBytes(), tenantId(), StpUtil.getLoginIdAsLong(), id,
             version);
         requireCurrent(count);
         discardIndex(id, version);
+        discardGraph(id, version);
     }
 
     /**
@@ -152,10 +169,12 @@ public class TrainingDocumentService {
      * @param id 资料编号
      * @param version 资料版本
      */
+    @org.springframework.transaction.annotation.Transactional
     public void delete(String id, int version) {
         requireCurrent(jdbc.update("DELETE FROM training_document" + CURRENT_DOCUMENT, tenantId(),
             StpUtil.getLoginIdAsLong(), id, version));
         discardIndex(id, version);
+        discardGraph(id, version);
     }
 
     /**
@@ -166,8 +185,10 @@ public class TrainingDocumentService {
      */
     public void retry(String id, int version) {
         currentName(id, version);
-        jdbc.update("UPDATE training_document SET index_state = 'pending', index_error = NULL"
-            + CURRENT_DOCUMENT, tenantId(), StpUtil.getLoginIdAsLong(), id, version);
+        jdbc.update(
+            "UPDATE training_document SET index_state = 'pending', index_error = NULL,"
+                + " graph_state = 'pending', graph_error = NULL" + CURRENT_DOCUMENT,
+            tenantId(), StpUtil.getLoginIdAsLong(), id, version);
     }
 
     private static long tenantId() {

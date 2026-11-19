@@ -47,3 +47,7 @@ powershell -ExecutionPolicy Bypass -File .\Start-Team.ps1 -Native
 每人从 main 新建自己的功能分支，例如 `git switch -c feature/face-login`。提交后推送分支，在 GitHub 发起 Pull Request 合并。仓库所有者在 Settings → Collaborators 邀请组员后，两人即可直接推送各自的分支。具体分工见[三人并行开发计划](阶段2三人并行开发计划.md)。
 
 本项目基于 [ContiNew Admin](https://github.com/continew-org/continew-admin) 和 [ContiNew Admin UI](https://github.com/continew-org/continew-admin-ui)，许可证保留在各自目录。
+
+## 任务三
+
+已接入 Windows 原生 Neo4j 与本地模型的图谱问答。首次启动追加 `-Graph`，操作步骤和核心代码见[任务三图谱问答验收](任务3图谱问答验收.md)。
