@@ -86,7 +86,7 @@ public class TrainingDocumentService {
 
     public record DocumentInfo(String documentId, int version, String fileName, int fileSize,
         LocalDateTime updatedAt, String indexState, String indexError, String graphState,
-        String graphError) {
+        String graphError, String buildMode) {
     }
 
     /**
@@ -97,31 +97,35 @@ public class TrainingDocumentService {
     public List<DocumentInfo> list() {
         return jdbc.query(
             "SELECT id, version, file_name, file_size, updated_at, index_state, index_error,"
-                + " graph_state, graph_error FROM training_document" + SCOPE
+                + " graph_state, graph_error, build_mode FROM training_document" + SCOPE
                 + " ORDER BY updated_at DESC, id",
             (row, index) -> new DocumentInfo(row.getString("id"), row.getInt("version"),
                 row.getString("file_name"), row.getInt("file_size"),
                 row.getTimestamp("updated_at").toLocalDateTime(), row.getString("index_state"),
                 row.getString("index_error"), row.getString("graph_state"),
-                row.getString("graph_error")),
+                row.getString("graph_error"), row.getString("build_mode")),
             tenantId(), StpUtil.getLoginIdAsLong());
     }
 
     /**
      * 新建资料，正文与元数据一起写入，初始版本为 1。
      *
+     * @param mode 构建方式
      * @param file 上传文件
      * @return 资料编号
      * @throws IOException 文件读取失败
      */
-    public String create(MultipartFile file) throws IOException {
+    public String create(MultipartFile file, String mode) throws IOException {
         String name = validateFile(file);
         String id = UUID.randomUUID().toString();
+        validateMode(mode);
         jdbc.update(
-            "INSERT INTO training_document (id, tenant_id, owner_id, version, file_name, file_size, file_content)"
-                + " VALUES (?, ?, ?, 1, ?, ?, ?)",
+            "INSERT INTO training_document (id, tenant_id, owner_id, version, file_name, file_size, file_content,"
+                + " build_mode, index_state, graph_state)"
+                + " VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
             id, tenantId(), StpUtil.getLoginIdAsLong(), name,
-            file.getSize(), file.getBytes());
+            file.getSize(), file.getBytes(), mode, "graph".equals(mode) ? "disabled" : "pending",
+            "rag".equals(mode) ? "disabled" : "pending");
         return id;
     }
 
@@ -130,17 +134,27 @@ public class TrainingDocumentService {
      *
      * @param id 资料编号
      * @param version 替换前的版本
+     * @param mode 构建方式，空表示保持当前方式
      * @param file 新文件
      * @throws IOException 文件读取失败
      */
     @org.springframework.transaction.annotation.Transactional
-    public void replace(String id, int version, MultipartFile file) throws IOException {
+    public void replace(String id, int version, MultipartFile file, String mode)
+        throws IOException {
         String name = validateFile(file);
+        if (mode == null) {
+            mode =
+                jdbc.queryForObject("SELECT build_mode FROM training_document" + CURRENT_DOCUMENT,
+                    String.class, tenantId(), StpUtil.getLoginIdAsLong(), id, version);
+        }
+        validateMode(mode);
         int count = jdbc.update(
             "UPDATE training_document SET file_name = ?, file_size = ?, file_content = ?,"
-                + " index_state = 'pending', index_error = NULL, graph_state = 'pending', graph_error = NULL,"
+                + " index_state = ?, index_error = NULL, graph_state = ?, graph_error = NULL, build_mode = ?,"
                 + " version = version + 1, updated_at = CURRENT_TIMESTAMP" + CURRENT_DOCUMENT,
-            name, file.getSize(), file.getBytes(), tenantId(), StpUtil.getLoginIdAsLong(), id,
+            name, file.getSize(), file.getBytes(), "graph".equals(mode) ? "disabled" : "pending",
+            "rag".equals(mode) ? "disabled" : "pending", mode, tenantId(),
+            StpUtil.getLoginIdAsLong(), id,
             version);
         requireCurrent(count);
         discardIndex(id, version);
@@ -186,9 +200,16 @@ public class TrainingDocumentService {
     public void retry(String id, int version) {
         currentName(id, version);
         jdbc.update(
-            "UPDATE training_document SET index_state = 'pending', index_error = NULL,"
-                + " graph_state = 'pending', graph_error = NULL" + CURRENT_DOCUMENT,
+            "UPDATE training_document SET index_state = CASE WHEN build_mode = 'graph' THEN 'disabled' ELSE 'pending' END, index_error = NULL,"
+                + " graph_state = CASE WHEN build_mode = 'rag' THEN 'disabled' ELSE 'pending' END, graph_error = NULL"
+                + CURRENT_DOCUMENT,
             tenantId(), StpUtil.getLoginIdAsLong(), id, version);
+    }
+
+    private static void validateMode(String mode) {
+        if (mode == null || !Set.of("rag", "graph", "both").contains(mode)) {
+            throw new BusinessException("请选择 RAG、GraphRAG 或同时构建");
+        }
     }
 
     private static long tenantId() {

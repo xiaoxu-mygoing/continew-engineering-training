@@ -84,14 +84,16 @@ public class TrainingDocumentController {
     }
 
     @PostMapping
-    public String create(@RequestPart MultipartFile file) throws IOException {
-        return service.create(file);
+    public String create(@RequestPart MultipartFile file,
+        @RequestParam(defaultValue = "both") String mode) throws IOException {
+        return service.create(file, mode);
     }
 
     @PutMapping("/{id}")
     public void replace(@PathVariable String id, @RequestParam int version,
-        @RequestPart MultipartFile file) throws IOException {
-        service.replace(id, version, file);
+        @RequestPart MultipartFile file, @RequestParam(required = false) String mode)
+        throws IOException {
+        service.replace(id, version, file, mode);
     }
 
     /**

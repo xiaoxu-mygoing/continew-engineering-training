@@ -1,13 +1,16 @@
 import http from '@/utils/http'
 
+export type BuildMode = 'rag' | 'graph' | 'both'
+
 export interface TrainingDocument {
+  buildMode: BuildMode
   documentId: string
   version: number
   fileName: string
   fileSize: number
-  indexState: 'ready' | 'pending' | 'failed'
+  indexState: 'ready' | 'pending' | 'failed' | 'disabled'
   indexError?: string
-  graphState: 'ready' | 'pending' | 'failed'
+  graphState: 'ready' | 'pending' | 'failed' | 'disabled'
   graphError?: string
   updatedAt: string
 }
@@ -85,13 +88,13 @@ export const retryIndex = (doc: TrainingDocument) =>
 
 export const listDocuments = () => http.get<TrainingDocument[]>(base)
 
-export function saveDocument(file: File, original?: TrainingDocument) {
+export function saveDocument(file: File, original?: TrainingDocument, mode?: BuildMode) {
   const form = new FormData()
   form.append('file', file)
   if (original) {
-    return http.put(`${base}/${original.documentId}`, form, { params: { version: original.version } })
+    return http.put(`${base}/${original.documentId}`, form, { params: { version: original.version, mode } })
   }
-  return http.post<string>(base, form)
+  return http.post<string>(base, form, { params: { mode: mode || 'both' } })
 }
 
 export const downloadDocument = (doc: TrainingDocument) =>

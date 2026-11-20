@@ -63,7 +63,8 @@ class TrainingGraphWorker {
             var output = process.getInputStream();
             var result = CompletableFuture.supplyAsync(() -> {
                 try (output) {
-                    return mapper.readTree(output);
+                    // Drain stdout before parsing so closing the parser cannot break the worker's final flush.
+                    return mapper.readTree(output.readAllBytes());
                 } catch (IOException e) {
                     throw new UncheckedIOException(e);
                 }

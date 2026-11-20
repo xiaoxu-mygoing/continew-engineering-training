@@ -34,7 +34,7 @@
           <li v-else>调用本地模型生成答案，核对原文后返回 {{ answer.workflow.citations }} 条引用。</li>
         </ol>
         <ol v-else>
-          <li>在 {{ answer.workflow.documents }} 份资料图谱中按实体名命中起点。</li>
+          <li>在 {{ answer.workflow.documents }} 份资料图谱中通过实体名或实体向量定位起点。</li>
           <li>沿关系扩展两跳，收集 {{ answer.workflow.nodes }} 个节点、{{ answer.workflow.edges }} 条关系。</li>
           <li v-if="answer.workflow.route === 'no_match'">未命中任何关系，跳过答案生成。</li>
           <li v-else>用关系证据生成答案，点击边可核对原文。</li>

@@ -11,3 +11,7 @@ CREATE TABLE training_graph_cleanup (
     document_id VARCHAR(36) NOT NULL,
     version INTEGER NOT NULL
 );
+
+-- changeset training:graph-build-mode-1 dbms:postgresql
+ALTER TABLE training_document ADD COLUMN build_mode VARCHAR(12) NOT NULL DEFAULT 'both';
+UPDATE training_document SET graph_state = 'pending', graph_error = NULL;

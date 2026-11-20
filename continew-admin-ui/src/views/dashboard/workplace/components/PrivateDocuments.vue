@@ -7,9 +7,17 @@
         <a-button type="primary" size="small" :disabled="busy" @click="chooseFile()">上传资料</a-button>
       </a-space>
     </template>
+    <a-space class="hint">
+      <span>上传资料的建库方式</span>
+      <a-radio-group v-model="buildMode" :disabled="busy">
+        <a-radio value="rag">RAG</a-radio>
+        <a-radio value="graph">GraphRAG</a-radio>
+        <a-radio value="both">同时构建</a-radio>
+      </a-radio-group>
+    </a-space>
     <input ref="picker" type="file" hidden accept=".txt,.pdf,.docx" @change="onFile" />
     <p class="hint">
-      仅自己可见 · PDF、DOCX 或 TXT · 每份最多 5 MB。上传后会自动建立索引。
+      仅自己可见 · PDF、DOCX 或 TXT · 每份最多 5 MB。按选择的方式自动建立索引，替换文件沿用该文件原有方式。
       <a :href="sampleUrl" download="工程实训器材借用指南.txt">下载示例 TXT</a>
     </p>
     <a-table
@@ -29,7 +37,7 @@
                   {{ statusText[record.indexState as TrainingDocument['indexState']] }}
                 </a-tag>
               </a-tooltip>
-              <a-link v-if="record.indexState !== 'pending'" :disabled="busy" @click="reindex(record)">
+              <a-link v-if="record.indexState !== 'pending' && record.indexState !== 'disabled'" :disabled="busy" @click="reindex(record)">
                 {{ record.indexState === 'failed' ? '重试' : '重建' }}
               </a-link>
             </a-space>
@@ -41,8 +49,10 @@
               <a-tag :color="record.graphState === 'failed' ? 'red' : record.graphState === 'ready' ? 'green' : 'blue'">
                 {{ statusText[record.graphState as TrainingDocument['graphState']] }}
               </a-tag>
-              <a-link v-if="record.graphState === 'failed'" :disabled="busy" @click="reindex(record)">重试</a-link>
             </a-tooltip>
+            <a-link v-if="record.graphState === 'failed' || (record.indexState === 'disabled' && record.graphState === 'ready')" :disabled="busy" @click="reindex(record)">
+              {{ record.graphState === 'failed' ? '重试' : '重建' }}
+            </a-link>
           </template>
         </a-table-column>
         <a-table-column title="更新时间" :width="148">
@@ -88,11 +98,12 @@ import DocumentQuestion from './DocumentQuestion.vue'
 import GraphCanvas from './GraphCanvas.vue'
 import type FilePreview from '@/components/FilePreview/index.vue'
 import { useDownload } from '@/hooks'
-import { type GraphEdge, type GraphNode, type TrainingDocument, deleteDocument, downloadDocument, fetchDocumentGraph, listDocuments, retryIndex, saveDocument } from '@/apis/training/documents'
+import { type BuildMode, type GraphEdge, type GraphNode, type TrainingDocument, deleteDocument, downloadDocument, fetchDocumentGraph, listDocuments, retryIndex, saveDocument } from '@/apis/training/documents'
 
 const documents = ref<TrainingDocument[]>([])
 const libraryOpen = ref(false)
-const statusText = { ready: '可问答', pending: '建立中', failed: '失败' }
+const buildMode = ref<BuildMode>('both')
+const statusText = { disabled: '未启用', ready: '可问答', pending: '建立中', failed: '失败' }
 const questionDoc = ref<TrainingDocument>()
 const graphOpen = ref(false)
 const graphTitle = ref('')
@@ -154,7 +165,7 @@ async function onFile(event: Event) {
   }
   busy.value = true
   try {
-    await saveDocument(file, replacement.value)
+    await saveDocument(file, replacement.value, replacement.value ? undefined : buildMode.value)
     Message.success(replacement.value ? '资料已更新' : '资料已上传')
   } finally {
     await refresh()
