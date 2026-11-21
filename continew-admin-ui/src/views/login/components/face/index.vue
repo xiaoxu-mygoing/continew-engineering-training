@@ -86,7 +86,7 @@ watch([ready, mode, username, tenant, attempt], ([active, method, account, tenan
         const label = `活体步骤 ${index + 1}/${challenge.actions.length}`
         status.value = `${label}：先自然睁眼、闭嘴，准备好后按下一条提示做动作。`
         await capturePhase(frames, 8)
-        const instruction = action === 'blink' ? '请缓慢闭眼保持约1秒，再睁眼' : '请张嘴保持约1秒，再闭嘴'
+        const instruction = { mouth: '请轻轻张嘴，保持片刻后闭嘴', down: '请轻轻低头，保持片刻后回正', turn: '请向左或向右转头一点，保持片刻后回正' }[action]
         status.value = `${label}：${instruction}，恢复自然后等待确认。未通过前不会切换动作。`
         const deadline = Date.now() + 20000
         let completed = false

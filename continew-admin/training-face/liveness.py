@@ -5,10 +5,18 @@ import hashlib
 
 def completed(scores, action):
     """Require neutral -> sustained requested action -> neutral, in that order."""
-    neutral = lambda s: s[0] < 0.25 and s[1] < 0.25 and s[2] < 0.18
-    active = (lambda s: min(s[0], s[1]) > 0.60) if action == "blink" else (lambda s: s[2] > 0.40)
-    if len(scores) < 12 or not all(neutral(s) for s in scores[:2]) or not all(neutral(s) for s in scores[-2:]):
+    if len(scores) < 12 or action not in ("mouth", "down", "turn"):
         return False
+    base = tuple((scores[0][i] + scores[1][i]) / 2 for i in range(3))
+    neutral = lambda s: s[0] < 0.25 and abs(s[1]-base[1]) < 8 and abs(s[2]-base[2]) < 8
+    if base[0] > 0.25 or not all(neutral(s) for s in scores[-2:]):
+        return False
+    if action == "mouth":
+        active = lambda s: s[0] > max(0.30, base[0]+0.18)
+    elif action == "down":
+        active = lambda s: s[1]-base[1] > 10 and abs(s[2]-base[2]) < 15
+    else:
+        active = lambda s: abs(s[2]-base[2]) > 13
     return any(active(scores[i]) and active(scores[i + 1]) for i in range(2, len(scores) - 3))
 
 
@@ -21,7 +29,7 @@ def verify(req, models, decode, extract, error):
 
     actions, batches = req.get("actions"), req.get("batches")
     preview = req.get("preview") is True
-    valid = actions in (["blink"], ["mouth"]) if preview else actions in (["blink", "mouth"], ["mouth", "blink"])
+    valid = isinstance(actions, list) and len(actions) == (1 if preview else 2) and len(set(actions)) == len(actions) and all(a in ("mouth", "down", "turn") for a in actions)
     if not valid or not isinstance(batches, list) or len(batches) != len(actions):
         raise error("活体验证步骤无效，请重新开启摄像头")
     if any(not isinstance(batch, list) or not 12 <= len(batch) <= 28 for batch in batches):
@@ -32,7 +40,7 @@ def verify(req, models, decode, extract, error):
                cv2.FaceRecognizerSF.create(str(models / "face_recognition_sface_2021dec.onnx"), ""))
     options = vision.FaceLandmarkerOptions(
         base_options=python.BaseOptions(model_asset_path=str(models / "face_landmarker.task")),
-        num_faces=2, output_face_blendshapes=True,
+        num_faces=2, output_face_blendshapes=True, output_facial_transformation_matrixes=True,
         min_face_detection_confidence=0.6, min_face_presence_confidence=0.6)
     baseline = None
     with vision.FaceLandmarker.create_from_options(options) as landmarker:
@@ -54,10 +62,13 @@ def verify(req, models, decode, extract, error):
                 if len(result.face_blendshapes) != 1:
                     raise error("请保持单人正对摄像头并完整露出面部")
                 values = {item.category_name: item.score for item in result.face_blendshapes[0]}
-                scores.append((values.get("eyeBlinkLeft", 0), values.get("eyeBlinkRight", 0), values.get("jawOpen", 0)))
+                rotation = result.facial_transformation_matrixes[0][:3, :3]
+                pitch = float(np.degrees(np.arctan2(-rotation[1, 2], rotation[2, 2])))
+                yaw = float(np.degrees(np.arctan2(rotation[0, 2], rotation[2, 2])))
+                scores.append((values.get("jawOpen", 0), pitch, yaw))
             if not completed(scores, action):
                 if preview:
                     return {"passed": False}
-                hint = "缓慢闭眼、保持片刻再睁开" if action == "blink" else "张嘴、保持片刻再闭嘴"
+                hint = {"mouth": "轻轻张嘴再闭嘴", "down": "轻轻低头再回正", "turn": "向任意一侧转头再回正"}[action]
                 raise error("动作未通过：请按提示" + hint + "，动作前后保持自然表情")
     return {"passed": True}

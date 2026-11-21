@@ -25,7 +25,7 @@ export interface LivenessContext {
 
 export interface LivenessChallenge {
   challengeId: string
-  actions: ('blink' | 'mouth')[]
+  actions: ('mouth' | 'down' | 'turn')[]
   expiresIn: number
 }
 

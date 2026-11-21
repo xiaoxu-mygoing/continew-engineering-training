@@ -61,8 +61,10 @@ public class FaceLivenessService {
      */
     public Challenge start(String scope) {
         String id = UUID.randomUUID().toString();
-        List<String> actions =
-            RANDOM.nextBoolean() ? List.of("blink", "mouth") : List.of("mouth", "blink");
+        List<String> pool = List.of("mouth", "down", "turn");
+        int first = RANDOM.nextInt(pool.size());
+        int second = (first + 1 + RANDOM.nextInt(2)) % pool.size();
+        List<String> actions = List.of(pool.get(first), pool.get(second));
         ObjectNode state = mapper.createObjectNode().put("scope", scope).put("issuedAt",
             System.currentTimeMillis());
         state.set("actions", mapper.valueToTree(actions));
