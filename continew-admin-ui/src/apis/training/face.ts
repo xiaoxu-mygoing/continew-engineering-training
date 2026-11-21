@@ -16,3 +16,28 @@ export const unbindFace = (password: string, version: number) =>
   http.del<FaceStatus>(url, { password, version })
 export const setIdentification = (enabled: boolean, password: string, version: number) =>
   http.put<FaceStatus>(`${url}/identification/${enabled}`, { password, version })
+
+export interface LivenessContext {
+  clientId: string
+  identify: boolean
+  username?: string
+}
+
+export interface LivenessChallenge {
+  challengeId: string
+  actions: ('blink' | 'mouth')[]
+  expiresIn: number
+}
+
+export const startLiveness = (context: LivenessContext, tenant: string, signal: AbortSignal) =>
+  http.post<LivenessChallenge>('/auth/face/liveness/challenge', context, {
+    headers: tenant ? { 'X-Tenant-Code': tenant } : {},
+    signal,
+  })
+
+export const verifyLiveness = (challengeId: string, context: LivenessContext, batches: string[][], tenant: string, signal: AbortSignal) =>
+  http.post<{ livenessToken: string, expiresIn: number }>('/auth/face/liveness/verify', { challengeId, context, batches }, {
+    headers: tenant ? { 'X-Tenant-Code': tenant } : {},
+    signal,
+    timeout: 70000,
+  })

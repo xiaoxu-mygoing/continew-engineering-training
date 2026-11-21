@@ -24,6 +24,7 @@ import top.continew.admin.auth.model.req.FaceLoginReq;
 import top.continew.admin.auth.model.resp.LoginResp;
 import top.continew.admin.system.model.entity.user.UserDO;
 import top.continew.admin.system.model.resp.ClientResp;
+import top.continew.admin.training.service.FaceLivenessService;
 import top.continew.admin.training.service.FaceRecognitionService;
 import top.continew.starter.core.exception.BusinessException;
 import top.continew.starter.extension.tenant.context.TenantContextHolder;
@@ -45,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 public class FaceLoginHandler extends AbstractLoginHandler<FaceLoginReq> {
 
     private final FaceRecognitionService recognition;
+    private final FaceLivenessService liveness;
 
     @Override
     @RateLimiter(name = "training:face:login", rate = 12, interval = 1, unit = TimeUnit.MINUTES,
@@ -53,6 +55,8 @@ public class FaceLoginHandler extends AbstractLoginHandler<FaceLoginReq> {
         HttpServletResponse response) {
         Long tenant = TenantContextHolder.isTenantEnabled() ? TenantContextHolder.getTenantId()
             : Long.valueOf(0L);
+        liveness.consume(req.getLivenessToken(), req.getImage(), liveness.scope(tenant,
+            req.getClientId(), req.isIdentify(), req.getUsername(), request.getRemoteAddr()));
         if (req.isIdentify()) {
             if (req.getUsername() != null && !req.getUsername().isBlank()) {
                 throw new BusinessException("免输账号模式无需指定用户名");

@@ -23,7 +23,7 @@ class FaceError(Exception):
     pass
 
 
-def extract(image, models, quality_only=False):
+def decode(image):
     import cv2
     import numpy as np
     from PIL import Image, UnidentifiedImageError
@@ -44,8 +44,17 @@ def extract(image, models, quality_only=False):
         raise FaceError("画面损坏，请重新采集")
     if cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean() < 38:
         raise FaceError("光线过暗，请面向光源后重新采集")
-    detector = cv2.FaceDetectorYN.create(str(models / "face_detection_yunet_2023mar.onnx"),
-                                         "", (frame.shape[1], frame.shape[0]), 0.85)
+    return frame
+
+
+def extract(image, models, quality_only=False, engines=None):
+    import cv2
+    import numpy as np
+
+    frame = decode(image)
+    detector = engines[0] if engines else cv2.FaceDetectorYN.create(
+        str(models / "face_detection_yunet_2023mar.onnx"), "", (frame.shape[1], frame.shape[0]), 0.85)
+    detector.setInputSize((frame.shape[1], frame.shape[0]))
     _, faces = detector.detect(frame)
     if faces is None or not len(faces):
         raise FaceError("未检测到人脸，请正对并靠近摄像头")
@@ -55,7 +64,8 @@ def extract(image, models, quality_only=False):
         raise FaceError("人脸过小，请靠近摄像头")
     if quality_only:
         return None
-    recognizer = cv2.FaceRecognizerSF.create(str(models / "face_recognition_sface_2021dec.onnx"), "")
+    recognizer = engines[1] if engines else cv2.FaceRecognizerSF.create(
+        str(models / "face_recognition_sface_2021dec.onnx"), "")
     aligned = recognizer.alignCrop(frame, faces[0])
     feature = recognizer.feature(aligned).flatten().astype(np.float32)
     if feature.shape != (128,) or not np.isfinite(feature).all():
@@ -65,6 +75,10 @@ def extract(image, models, quality_only=False):
 
 def process(req, home):
     op = req["op"]
+    if op == "liveness":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from liveness import verify
+        return verify(req, home / "models", decode, extract, FaceError)
     owner = (int(req["tenant"]), int(req["user"]))
     if op == "quality":
         try:

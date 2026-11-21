@@ -73,10 +73,10 @@ async function start() {
   }
 }
 
-function capture() {
+function capture(maxSide = 640) {
   const el = video.value
   if (!active.value || !el?.videoWidth || !el.videoHeight) return
-  const scale = Math.min(1, 640 / Math.max(el.videoWidth, el.videoHeight))
+  const scale = Math.min(1, maxSide / Math.max(el.videoWidth, el.videoHeight))
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(el.videoWidth * scale)
   canvas.height = Math.round(el.videoHeight * scale)

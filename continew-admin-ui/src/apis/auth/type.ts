@@ -71,6 +71,7 @@ export interface FaceLoginReq extends AuthReq {
   username?: string
   identify?: boolean
   image: string
+  livenessToken: string
 }
 
 /** 手机号登录请求参数 */

@@ -59,6 +59,25 @@ public class FaceRecognitionService {
      * @return 状态或比对结果
      */
     public JsonNode run(String operation, Long tenant, long user, long version, String image) {
+        ObjectNode req = mapper.createObjectNode().put("op", operation)
+            .put("tenant", tenant).put("user", user).put("version", version).put("image", image);
+        return execute(req, tenant, 15);
+    }
+
+    /**
+     * 验证服务端指定的动作与连续采集帧。
+     *
+     * @param req 活体采集内容
+     * @param tenant 当前租户
+     * @return 活体判定
+     * @since 4.2.0
+     */
+    public JsonNode liveness(ObjectNode req, Long tenant) {
+        req.put("op", "liveness");
+        return execute(req, tenant, 60);
+    }
+
+    private JsonNode execute(ObjectNode req, Long tenant, int timeoutSeconds) {
         if (tenant == null || home.isBlank() || script.isBlank()
             || !Files.isRegularFile(Path.of(script))) {
             throw new BusinessException("本地人脸识别服务未就绪，请使用密码登录");
@@ -74,13 +93,10 @@ public class FaceRecognitionService {
             builder.environment().put("TRAINING_FACE_HOME", home);
             builder.redirectError(ProcessBuilder.Redirect.DISCARD);
             process = builder.start();
-            ObjectNode req =
-                mapper.createObjectNode().put("op", operation).put("tenant", tenant.longValue())
-                    .put("user", user).put("version", version).put("image", image);
             try (OutputStream input = process.getOutputStream()) {
                 mapper.writeValue(input, req);
             }
-            if (!process.waitFor(15, TimeUnit.SECONDS) || process.exitValue() != 0) {
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS) || process.exitValue() != 0) {
                 throw new BusinessException("识别服务未响应，请稍后重试");
             }
             JsonNode result = mapper.readTree(process.getInputStream());

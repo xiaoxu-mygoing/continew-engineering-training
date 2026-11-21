@@ -44,4 +44,8 @@ public class FaceLoginReq extends LoginReq {
     @NotBlank
     @Size(max = 450000, message = "采集画面过大")
     private String image;
+
+    @NotBlank(message = "请先完成活体验证")
+    @Size(max = 36)
+    private String livenessToken;
 }
