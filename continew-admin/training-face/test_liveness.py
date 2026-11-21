@@ -19,6 +19,10 @@ class ActionTests(unittest.TestCase):
             self.assertTrue(completed(samples, action))
             self.assertFalse(completed(samples, "mouth" if action == "blink" else "blink"))
 
+    def test_delayed_action_is_accepted_after_completion(self):
+        self.assertFalse(completed([self.neutral] * 20, "blink"))
+        self.assertTrue(completed([self.neutral] * 20 + [self.blink] * 3 + [self.neutral] * 4, "blink"))
+
     def test_missing_neutral_start_or_return_is_rejected(self):
         self.assertFalse(completed([self.blink] * 8 + [self.neutral] * 8, "blink"))
         self.assertFalse(completed([self.neutral] * 8 + [self.blink] * 8, "blink"))

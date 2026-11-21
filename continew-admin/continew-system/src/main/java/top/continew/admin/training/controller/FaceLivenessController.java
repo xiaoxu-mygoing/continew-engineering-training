@@ -95,6 +95,28 @@ public class FaceLivenessController {
             scope(input.context(), request), tenant());
     }
 
+    public record ProgressRequest(@NotBlank @Size(max = 36) String challengeId,
+        int step, @NotNull @Valid Context context,
+        @NotNull @Size(min = 12, max = 28) List<@NotBlank @Size(max = 100000) String> frames) {
+    }
+
+    /**
+     * 检查动作完成情况，未完成时停留在当前步骤。
+     * @param input 采集内容
+     * @param request 请求
+     * @param response 响应
+     * @return 完成状态
+     */
+    @PostMapping("/progress")
+    @RateLimiter(name = "training:face:progress", rate = 30, interval = 1, unit = TimeUnit.MINUTES,
+        type = LimitType.IP, message = "活体检测过于频繁，请稍后重试")
+    public boolean progress(@RequestBody @Valid ProgressRequest input,
+        HttpServletRequest request, HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+        return liveness.progress(input.challengeId(), input.step(), input.frames(),
+            scope(input.context(), request), tenant());
+    }
+
     private String scope(Context context, HttpServletRequest request) {
         return liveness.scope(tenant(), context.clientId(), context.identify(), context.username(),
             request.getRemoteAddr());

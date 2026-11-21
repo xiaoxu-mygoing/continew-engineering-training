@@ -41,3 +41,10 @@ export const verifyLiveness = (challengeId: string, context: LivenessContext, ba
     signal,
     timeout: 70000,
   })
+
+export const checkLivenessProgress = (challengeId: string, step: number, context: LivenessContext, frames: string[], tenant: string, signal: AbortSignal) =>
+  http.post<boolean>('/auth/face/liveness/progress', { challengeId, step, context, frames }, {
+    headers: tenant ? { 'X-Tenant-Code': tenant } : {},
+    signal,
+    timeout: 70000,
+  })

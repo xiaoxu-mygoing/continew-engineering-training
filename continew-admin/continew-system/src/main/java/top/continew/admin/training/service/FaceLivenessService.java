@@ -133,6 +133,35 @@ public class FaceLivenessService {
             .add(username == null ? "" : username.trim()).add(address).toString());
     }
 
+    /**
+     * 预检当前动作，不签发凭证；最终登录仍重新核验完整序列。
+     * @param id 挑战编号
+     * @param step 步骤
+     * @param frames 采集帧
+     * @param scope 登录范围
+     * @param tenant 租户
+     * @return 当前动作是否完成
+     * @since 4.2.0
+     */
+    public boolean progress(String id, int step, List<String> frames, String scope, Long tenant) {
+        String value = bucket("challenge", id).get();
+        if (value == null || step < 0 || step > 1) {
+            throw new BusinessException("活体挑战已过期，请重新验证");
+        }
+        try {
+            JsonNode state = mapper.readTree(value);
+            if (!state.path("scope").asText().equals(scope)) {
+                throw new BusinessException("登录信息已变化，请重新验证");
+            }
+            ObjectNode req = mapper.createObjectNode().put("preview", true);
+            req.putArray("actions").add(state.path("actions").get(step).asText());
+            req.putArray("batches").add(mapper.valueToTree(frames));
+            return recognition.liveness(req, tenant).path("passed").asBoolean(false);
+        } catch (java.io.IOException e) {
+            throw new BusinessException("活体挑战无效");
+        }
+    }
+
     private JsonNode take(String kind, String id, String scope) {
         if (id == null || !id.matches("[0-9a-f-]{36}")) {
             throw new BusinessException("请先完成活体验证");

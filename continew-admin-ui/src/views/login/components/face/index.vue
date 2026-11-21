@@ -16,7 +16,7 @@
 <script setup lang="ts">
 import { Message } from '@arco-design/web-vue'
 import FaceCamera from '@/components/FaceCamera/index.vue'
-import { startLiveness, verifyLiveness } from '@/apis/training/face'
+import { checkLivenessProgress, startLiveness, verifyLiveness } from '@/apis/training/face'
 import { useTabsStore, useTenantStore, useUserStore } from '@/stores'
 
 const camera = ref<InstanceType<typeof FaceCamera>>()
@@ -84,12 +84,28 @@ watch([ready, mode, username, tenant, attempt], ([active, method, account, tenan
         const frames: string[] = []
         batches.push(frames)
         const label = `活体步骤 ${index + 1}/${challenge.actions.length}`
-        status.value = `${label}：先自然睁眼、闭嘴，保持正对摄像头。`
-        await capturePhase(frames, 4)
-        status.value = `${label}：${action === 'blink' ? '请闭眼保持约1秒，再睁眼' : '请张嘴保持约1秒，再闭嘴'}。`
+        status.value = `${label}：先自然睁眼、闭嘴，准备好后按下一条提示做动作。`
         await capturePhase(frames, 8)
-        status.value = `${label}：恢复自然睁眼、闭嘴，保持不动。`
-        await capturePhase(frames, 4)
+        const instruction = action === 'blink' ? '请缓慢闭眼保持约1秒，再睁眼' : '请张嘴保持约1秒，再闭嘴'
+        status.value = `${label}：${instruction}，恢复自然后等待确认。未通过前不会切换动作。`
+        const deadline = Date.now() + 20000
+        let completed = false
+        while (Date.now() < deadline) {
+          await capturePhase(frames, 8)
+          if (frames.length > 28) frames.splice(4, frames.length - 28)
+          const sample = [...frames]
+          const result = await checkLivenessProgress(challenge.challengeId, index, context, sample, tenantCode.trim(), signal)
+          signal.throwIfAborted()
+          if (result.data) {
+            batches[index] = sample
+            completed = true
+            status.value = `${label}：已完成。`
+            await pause(1200)
+            break
+          }
+          status.value = `${label}：尚未检测到完整动作。${instruction}，然后保持自然睁眼闭嘴。`
+        }
+        if (!completed) throw new Error('当前动作等待超时，请重新验证')
       }
       status.value = '正在核验活体动作和人脸身份，请稍候…'
       const proof = (await verifyLiveness(challenge.challengeId, context, batches, tenantCode.trim(), signal)).data

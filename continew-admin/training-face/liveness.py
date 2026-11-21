@@ -20,7 +20,9 @@ def verify(req, models, decode, extract, error):
     from mediapipe.tasks.python import vision
 
     actions, batches = req.get("actions"), req.get("batches")
-    if actions not in (["blink", "mouth"], ["mouth", "blink"]) or not isinstance(batches, list) or len(batches) != 2:
+    preview = req.get("preview") is True
+    valid = actions in (["blink"], ["mouth"]) if preview else actions in (["blink", "mouth"], ["mouth", "blink"])
+    if not valid or not isinstance(batches, list) or len(batches) != len(actions):
         raise error("活体验证步骤无效，请重新开启摄像头")
     if any(not isinstance(batch, list) or not 12 <= len(batch) <= 28 for batch in batches):
         raise error("采集帧数不足，请保持摄像头开启")
@@ -36,6 +38,8 @@ def verify(req, models, decode, extract, error):
     with vision.FaceLandmarker.create_from_options(options) as landmarker:
         for action, batch in zip(actions, batches):
             if len({hashlib.sha256(frame.encode()).digest() for frame in batch}) < 6:
+                if preview:
+                    return {"passed": False}
                 raise error("画面缺少连续变化，请本人完成动作")
             scores = []
             for image in batch:
@@ -52,6 +56,8 @@ def verify(req, models, decode, extract, error):
                 values = {item.category_name: item.score for item in result.face_blendshapes[0]}
                 scores.append((values.get("eyeBlinkLeft", 0), values.get("eyeBlinkRight", 0), values.get("jawOpen", 0)))
             if not completed(scores, action):
+                if preview:
+                    return {"passed": False}
                 hint = "缓慢闭眼、保持片刻再睁开" if action == "blink" else "张嘴、保持片刻再闭嘴"
                 raise error("动作未通过：请按提示" + hint + "，动作前后保持自然表情")
     return {"passed": True}
