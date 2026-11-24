@@ -89,6 +89,7 @@ import top.continew.admin.system.service.UserPasswordHistoryService;
 import top.continew.admin.system.service.UserRoleService;
 import top.continew.admin.system.service.UserService;
 import top.continew.admin.system.service.UserSocialService;
+import top.continew.admin.training.service.TrainingPrivacyCleanupService;
 import top.continew.starter.auth.refresh.token.api.AuthPolicyWriteLocked;
 import top.continew.starter.auth.refresh.token.support.UserArgumentPolicyLockTargetResolver;
 import top.continew.starter.cache.redisson.util.RedisUtils;
@@ -143,6 +144,7 @@ public class UserServiceImpl
     private final OnlineUserService onlineUserService;
     private final FileService fileService;
     private final FileStorageService fileStorageService;
+    private final TrainingPrivacyCleanupService privacy;
 
     @Resource
     private DeptService deptService;
@@ -255,6 +257,7 @@ public class UserServiceImpl
         userSocialService.deleteByUserIds(ids);
         // 删除用户
         super.delete(ids);
+        privacy.removeAccounts(idList);
         // 踢出在线用户
         ids.forEach(id -> {
             onlineUserService.kickOut(id);

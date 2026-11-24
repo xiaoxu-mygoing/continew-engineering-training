@@ -1,4 +1,4 @@
-﻿param([switch]$Native,[switch]$Build,[switch]$Face,[switch]$Rag,[switch]$Graph)
+﻿param([switch]$Native,[switch]$Build,[switch]$Face,[switch]$Rag,[switch]$Graph,[string]$Python = 'py')
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $rt = Join-Path $PSScriptRoot 'local-runtime'
@@ -8,6 +8,7 @@ $jar = Join-Path $api 'continew-server/target/continew-admin.jar'
 function CheckExit($step) { if ($LASTEXITCODE) { throw "$step failed ($LASTEXITCODE)" } }
 function Listening($port) { [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
 foreach ($cmd in 'java','node','pnpm.cmd') { Get-Command $cmd -ErrorAction Stop | Out-Null }
+if ($Face -or $Rag -or $Graph) { Get-Command $Python -ErrorAction Stop | Out-Null }
 New-Item -Path $rt -ItemType Directory -Force | Out-Null
 if (!$Native) {
     Get-Command docker -ErrorAction Stop | Out-Null
@@ -26,11 +27,11 @@ if (!$Native) {
 } elseif (!$env:DB_USER -or !$env:DB_PWD -or !$env:REDIS_PWD) {
     throw 'Native mode requires DB_USER, DB_PWD and REDIS_PWD. See README.'
 }
-if ($Face) { & "$api/training-face/Start-CiaoFace.ps1" -Runtime "$rt/face-ciao" -Install }
+if ($Face) { & "$api/training-face/Start-CiaoFace.ps1" -Runtime "$rt/face-ciao" -Python $Python -Install }
 $env:TRAINING_RAG_HOME="$rt/rag"
 $env:TRAINING_RAG_PYTHON="$rt/rag/venv/Scripts/python.exe"
 if ($Rag -or $Graph) {
-    if (!(Test-Path $env:TRAINING_RAG_PYTHON)) { py -m venv "$rt/rag/venv"; CheckExit 'Python venv' }
+    if (!(Test-Path $env:TRAINING_RAG_PYTHON)) { & $Python -m venv "$rt/rag/venv"; CheckExit 'Python venv' }
     & $env:TRAINING_RAG_PYTHON -m pip install -r "$api/training-rag/requirements.txt"; CheckExit 'RAG packages'
     foreach ($model in 'nomic-embed-text','qwen2.5:3b') { ollama pull $model; CheckExit 'Ollama model' }
 }
@@ -42,7 +43,7 @@ if ($Graph -or (Test-Path "$rt/neo4j/credentials.json")) {
 }
 if ($Build -or !(Test-Path $jar)) {
     Push-Location $api
-    try { & .\mvnw.cmd -DskipTests -P fat-jar package; CheckExit 'Maven build' } finally { Pop-Location }
+    try { & .\mvnw.cmd -DskipTests '-Dmaven.jar.forceCreation=true' -P fat-jar package; CheckExit 'Maven build' } finally { Pop-Location }
 }
 if ($Build -or !(Test-Path "$ui/node_modules/vite/bin/vite.js")) {
     Push-Location $ui

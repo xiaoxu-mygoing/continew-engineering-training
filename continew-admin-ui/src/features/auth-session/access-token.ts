@@ -4,6 +4,14 @@ let accessToken: string | null = null
 let authGeneration = 0
 const accessTokenEvents = new EventTarget()
 const ACCESS_TOKEN_CHANGE_EVENT = 'change'
+const TAB_SESSION_KEY = 'continew-tab-session-id'
+let tabSessionId: string | undefined
+
+class SessionChangedError extends Error {
+  constructor() {
+    super('此浏览器中的登录账号已切换，请在当前窗口重新登录。')
+  }
+}
 
 const isLogin = () => {
   return !!accessToken
@@ -18,7 +26,30 @@ const getAuthGeneration = () => {
   return authGeneration
 }
 
+/**
+ * 读取 Access Token 绑定的登录会话 ID（JWT 中的 sid 声明）。
+ * 用于前端展示和续签时校验会话一致性，服务端仍独立校验令牌及操作人。
+ */
+const getSessionId = (token = accessToken): string | undefined => {
+  const payload = token?.split('.')[1]
+  if (!payload) return undefined
+  try {
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+    // 只按 ASCII 模式匹配 sid，避免解码载荷中可能存在的非 UTF-8 字节。
+    return atob(base64).match(/"sid"\s*:\s*"([^"]+)"/)?.[1]
+  } catch {
+    return undefined
+  }
+}
+
 const setAccessToken = (value: string) => {
+  tabSessionId = getSessionId(value)
+  // 仅记录标签页已选定的会话标识，访问令牌继续只保存在内存中。
+  try {
+    if (tabSessionId) sessionStorage.setItem(TAB_SESSION_KEY, tabSessionId)
+  } catch {
+    // 存储受限时仍可检查当前页面内的续签。
+  }
   if (accessToken !== value) {
     authGeneration += 1
   }
@@ -40,23 +71,14 @@ const onAccessTokenChange = (listener: (token: string | null) => void) => {
   return () => accessTokenEvents.removeEventListener(ACCESS_TOKEN_CHANGE_EVENT, handler)
 }
 
-/**
- * 读取 Access Token 绑定的登录会话 ID（JWT 中的 sid 声明）。
- *
- * 仅用于前端展示判断（例如在线用户列表禁用“强退自己”），不作为任何鉴权依据，
- * 服务端仍然独立校验操作人。令牌本身不可信时返回 undefined。
- */
-const getSessionId = (): string | undefined => {
-  if (!accessToken) return undefined
-  const payload = accessToken.split('.')[1]
-  if (!payload) return undefined
+const assertSameTabSession = (token: string) => {
+  let expected = tabSessionId
   try {
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
-    // 只按 ASCII 模式匹配 sid，避免解码载荷中可能存在的非 UTF-8 字节。
-    return atob(base64).match(/"sid"\s*:\s*"([^"]+)"/)?.[1]
+    expected ??= sessionStorage.getItem(TAB_SESSION_KEY) ?? undefined
   } catch {
-    return undefined
+    // 当前页面内已有会话时继续使用内存中的标识。
   }
+  if (expected && expected !== getSessionId(token)) throw new SessionChangedError()
 }
 
 export {
@@ -64,6 +86,8 @@ export {
   getAccessToken,
   getAuthGeneration,
   getSessionId,
+  assertSameTabSession,
+  SessionChangedError,
   setAccessToken,
   clearAccessToken,
   onAccessTokenChange,

@@ -21,6 +21,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,6 +35,7 @@ import top.continew.admin.common.util.SecureUtils;
 import top.continew.admin.system.model.entity.user.UserDO;
 import top.continew.admin.system.service.UserService;
 import top.continew.admin.training.service.FaceRecognitionService;
+import top.continew.admin.training.service.TrainingPrivacyCleanupService;
 import top.continew.starter.core.exception.BusinessException;
 import top.continew.starter.extension.tenant.context.TenantContextHolder;
 import top.continew.starter.log.annotation.Log;
@@ -63,6 +65,7 @@ public class UserFaceController {
     private final FaceRecognitionService recognition;
     private final PasswordEncoder encoder;
     private final UserService users;
+    private final TrainingPrivacyCleanupService privacy;
 
     public record Change(@NotBlank @Size(max = 256) String password,
         @NotNull @PositiveOrZero Long version,
@@ -85,6 +88,7 @@ public class UserFaceController {
     }
 
     @PutMapping
+    @Transactional(rollbackFor = Exception.class)
     @RateLimiter(name = "training:face:bind", rate = 8, interval = 1, unit = TimeUnit.MINUTES,
         type = LimitType.IP)
     public JsonNode bind(@RequestBody @Valid Change change) {
@@ -92,6 +96,7 @@ public class UserFaceController {
     }
 
     @PutMapping("/identification/{enabled}")
+    @Transactional(rollbackFor = Exception.class)
     @RateLimiter(name = "training:face:identification", rate = 8, interval = 1,
         unit = TimeUnit.MINUTES, type = LimitType.IP)
     public JsonNode identification(@PathVariable boolean enabled,
@@ -100,6 +105,7 @@ public class UserFaceController {
     }
 
     @DeleteMapping
+    @Transactional(rollbackFor = Exception.class)
     @RateLimiter(name = "training:face:unbind", rate = 8, interval = 1, unit = TimeUnit.MINUTES,
         type = LimitType.IP)
     public JsonNode unbind(@RequestBody @Valid Change change) {
@@ -114,6 +120,7 @@ public class UserFaceController {
             || !encoder.matches(password, user.getPassword())) {
             throw new BusinessException("当前账号密码不正确");
         }
+        privacy.requireActiveAccount(id);
         return recognition.run(operation, tenant(), id, change.version(), change.image());
     }
 

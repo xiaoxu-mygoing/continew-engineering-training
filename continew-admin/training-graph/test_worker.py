@@ -32,6 +32,38 @@ class GraphRegressionTests(unittest.TestCase):
         self.assertEqual(result["workflow"]["route"], "unverified")
         self.assertEqual(result["sources"], [])
 
+    def test_only_cited_passages_are_returned_once_across_documents(self):
+        graphs = [graph("first", "LAB-07 存放在 A 柜。"),
+                  graph("unquoted", "LAB-07 的配件放在 B 柜。"),
+                  graph("last", "LAB-07 由张老师管理。")]
+        reply = {"answer": "LAB-07 存放在 A 柜，由张老师管理。",
+                 "quotes": ["由张老师管理", "存放在 A 柜", "LAB-07 存放在 A 柜。"]}
+        with patch.object(worker, "load", side_effect=graphs), \
+                patch.object(worker, "ollama", return_value={"message": {"content": json.dumps(reply)}}):
+            result = worker.ask({"documents": [{}, {}, {}], "question": "LAB-07 在哪，由谁管理？"})
+        self.assertEqual(result["workflow"]["route"], "answered")
+        self.assertEqual([item["documentId"] for item in result["sources"]], ["last", "first"])
+        self.assertEqual(result["sources"][0]["text"], "LAB-07 由张老师管理。")
+        self.assertEqual(len(result["edges"]), 3)
+
+    def test_numbers_from_uncited_passages_do_not_validate_answer(self):
+        evidence = [{"text": "设备存放在 A 柜。"}, {"text": "归还时间是 17:30。"}]
+        reply = {"answer": "设备在 A 柜，归还时间是 17:30。", "quotes": ["设备存放在 A 柜。"]}
+        with patch.object(worker, "ollama", return_value={"message": {"content": json.dumps(reply)}}):
+            self.assertIsNone(worker.answer_with_model(evidence, "设备在哪，几点归还？"))
+
+    def test_unmatched_quote_does_not_validate_answer(self):
+        evidence = [{"text": "设备存放在 A 柜。"}]
+        reply = {"answer": "设备在 A 柜。", "quotes": ["存放在 A 柜", "柜子在实验室"]}
+        with patch.object(worker, "ollama", return_value={"message": {"content": json.dumps(reply)}}):
+            self.assertIsNone(worker.answer_with_model(evidence, "设备在哪？"))
+
+    def test_neighboring_relation_alone_does_not_prove_device_location(self):
+        evidence = [{"text": "LAB-07 设备在 A 柜。"}, {"text": "A 柜位于教学仓库。"}]
+        reply = {"answer": "A 柜。", "quotes": ["A 柜位于教学仓库。"]}
+        with patch.object(worker, "ollama", return_value={"message": {"content": json.dumps(reply)}}):
+            self.assertIsNone(worker.answer_with_model(evidence, "LAB-07 设备在哪？"))
+
     def test_semantic_seed_without_literal_name(self):
         data = graph("first", "A柜")
         data["semantic_seeds"] = {1}

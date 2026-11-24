@@ -27,6 +27,10 @@ databaseChangeLog:
       file: db/changelog/mysql/training_graph.sql
   - include:
       file: db/changelog/postgresql/training_graph.sql
+  - include:
+      file: db/changelog/mysql/training_privacy.sql
+  - include:
+      file: db/changelog/postgresql/training_privacy.sql
 # PostgreSQL
 #  - include:
 #      file: db/changelog/postgresql/main_table.sql

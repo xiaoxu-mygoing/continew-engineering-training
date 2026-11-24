@@ -3,7 +3,7 @@ import NProgress from 'nprogress'
 import type { Router } from 'vue-router'
 import { START_LOCATION } from 'vue-router'
 import { useRouteStore, useUserStore } from '@/stores'
-import { getAccessToken } from '@/features/auth-session/access-token'
+import { SessionChangedError, getAccessToken } from '@/features/auth-session/access-token'
 import { isHttp } from '@/utils/validate'
 import 'nprogress/nprogress.css'
 import { setRouteEmitter } from '@/hooks'
@@ -98,6 +98,11 @@ const restoreSessionOnce = (userStore: ReturnType<typeof useUserStore>) => {
     })
     .catch((error: unknown) => {
       const status = (error as { response?: { status?: number } })?.response?.status
+      if (error instanceof SessionChangedError) {
+        sessionRestoreRecoverableFailure = false
+        Message.warning(error.message)
+        return false
+      }
       // 只有明确 401 才记住“本次页面已确认无会话”。限流、网络和服务端
       // 临时故障不删除 Cookie，并允许后续进入受保护页面时重新恢复。
       if (status !== 401) {

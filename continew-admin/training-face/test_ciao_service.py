@@ -58,6 +58,31 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(200, result.status_code)
             self.assertFalse(result.json()["data"]["bound"])
 
+    def test_purge_removes_only_target_template_and_invalidates_cached_sessions(self):
+        self.bind(0, 1)
+        self.bind(0, 2)
+        self.bind(2, 1)
+        worker.process({"op": "enable", "tenant": 0, "user": 1, "version": 1}, self.home)
+        with patch.object(server, "store", server.ScopedSessionStore(30, 120, 20)):
+            target = server.store.create(server.ScopedSession(0, 1))
+            identify = server.store.create(server.ScopedSession(0, 0))
+            other = server.store.create(server.ScopedSession(0, 2))
+            other_tenant = server.store.create(server.ScopedSession(2, 1))
+            request = {"op": "purge", "tenant": 0, "user": 1}
+            self.assertEqual({"data": {"deleted": True}}, server.worker(request, server.KEY))
+            self.assertEqual({"data": {"deleted": True}}, server.worker(request, server.KEY))
+            self.assertIsNone(server.store.get_entry(target))
+            self.assertIsNone(server.store.get_entry(identify))
+            self.assertIsNotNone(server.store.get_entry(other))
+            self.assertIsNotNone(server.store.get_entry(other_tenant))
+        status = worker.process({"op": "status", "tenant": 0, "user": 1}, self.home)
+        self.assertFalse(status["bound"])
+        self.assertFalse(status["identificationEnabled"])
+        self.assertEqual(0, status["templateVersion"])
+        with self.assertRaisesRegex(worker.FaceError, "账号已删除"):
+            self.bind(0, 1)
+        self.assertEqual({"1"}, set(server.ScopedSession(2, 1).database))
+
     def test_matching_needs_five_consecutive_frames(self):
         self.bind(0, 1)
         session = server.ScopedSession(0, 1)

@@ -4,9 +4,11 @@ import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } fro
 import { useTenantStore } from '@/stores/modules/tenant'
 import { useUserStore } from '@/stores'
 import {
-  clearAccessToken,
+  SessionChangedError,
+  assertSameTabSession,
   getAccessToken,
   getAuthGeneration,
+  getSessionId,
 } from '@/features/auth-session/access-token'
 import modalErrorWrapper from '@/utils/modal-error-wrapper'
 import messageErrorWrapper from '@/utils/message-error-wrapper'
@@ -45,6 +47,8 @@ const http: AxiosInstance = axios.create({
 interface RefreshableRequestConfig extends AxiosRequestConfig {
   /** 请求发起时的认证代次，用于拒绝过期响应清除新会话。 */
   __authGeneration?: number
+  /** 原请求发出时的会话，重试必须仍由该会话执行。 */
+  __authSessionId?: string
   /** 标记该请求已经重试过，防止 Access Token 失效时无限循环。 */
   __isRetryRequest?: boolean
   /** 刷新请求自身失败时禁止再次触发刷新。 */
@@ -75,30 +79,27 @@ const isTenantIndependentAuthEndpoint = (config: AxiosRequestConfig) => {
   return typeof data !== 'object' || data?.authType !== 'SOCIAL'
 }
 
-const showReLogin = async (failedGeneration: number, message?: string) => {
+const showReLogin = async (failedGeneration: number, message?: string, sessionChanged = false) => {
   let clearedGeneration: number | undefined
   let redirectPath: string | undefined
   await withAuthLifecycleLock(async () => {
     // 旧请求的 401 到达时，新登录或刷新可能已经建立了下一代会话，不能清除它。
     if (authFailureShown || failedGeneration !== getAuthGeneration()) return
     authFailureShown = true
-    clearAccessToken()
     redirectPath = router.currentRoute.value.fullPath
     // 已确认当前登录态失效时立即清理持久化的角色、权限、租户和动态路由，避免
     // 用户停留在弹窗期间仍看到上一会话的菜单。
     await useUserStore().logoutCallBack()
     clearedGeneration = getAuthGeneration()
-    // 客户端确认当前会话失效后，主动让服务端清理 HttpOnly Cookie。
-    try {
-      await http.post('/auth/logout', undefined, {
-        withCredentials: true,
-        __skipRefresh: true,
-      } as RefreshableRequestConfig)
-    } catch {
-      // 服务端不可用时继续走本地重新登录流程。
-    }
+    // 自动失效只处理当前页面，其他标签页可能已经设置了新的登录 Cookie。
   })
-  if (clearedGeneration === undefined) return
+  if (clearedGeneration === undefined || clearedGeneration !== getAuthGeneration()) return
+  const loginPath = `/login?redirect=${encodeURIComponent(redirectPath || '/')}`
+  if (sessionChanged) {
+    await router.replace(loginPath)
+    messageErrorWrapper({ content: message || '登录会话已切换，请重新登录' })
+    return
+  }
   // 服务端能把"被顶下线/被踢下线"区分开，优先用它给的提示让用户知道发生了什么。
   modalErrorWrapper({
     title: '提示',
@@ -109,7 +110,7 @@ const showReLogin = async (failedGeneration: number, message?: string) => {
     async onOk() {
       // 用户在弹窗期间重新登录时，不允许旧弹窗把新会话重置或重定向到登录页。
       if (clearedGeneration !== getAuthGeneration()) return
-      await router.replace(`/login?redirect=${encodeURIComponent(redirectPath || '/')}`)
+      await router.replace(loginPath)
     },
   })
 }
@@ -125,6 +126,7 @@ const refreshAccessToken = () => {
       if (!response.data?.success || !accessToken) {
         throw new Error(response.data?.msg || '刷新登录状态失败，请稍后重试')
       }
+      assertSameTabSession(accessToken)
       // 同步 Pinia 中供页面展示使用的内存状态；HTTP 请求仍以本模块的单一令牌值为准。
       useUserStore().updateAccessToken(accessToken)
       // 租户功能关闭或后端未返回租户时也要清除旧值，避免下一次开启租户功能后误用旧租户。
@@ -167,6 +169,8 @@ const retryAfterRefresh = async (config: AxiosRequestConfig, error?: unknown) =>
   if (retryConfig.__skipRefresh || isAuthEndpoint(retryConfig.url)) {
     throw error || new Error('认证请求失败')
   }
+  const sessionId = retryConfig.__authSessionId
+  if (sessionId && sessionId !== getSessionId()) throw new SessionChangedError()
   if (retryConfig.__isRetryRequest) {
     const reason = extractInvalidMessage(error)
     await showReLogin(retryConfig.__authGeneration ?? getAuthGeneration(), reason)
@@ -175,13 +179,16 @@ const retryAfterRefresh = async (config: AxiosRequestConfig, error?: unknown) =>
 
   try {
     const accessToken = await refreshAccessToken()
+    if (sessionId && sessionId !== getSessionId(accessToken)) throw new SessionChangedError()
     retryConfig.__isRetryRequest = true
     retryConfig.__authGeneration = getAuthGeneration()
     retryConfig.headers = retryConfig.headers || {}
     retryConfig.headers.Authorization = `Bearer ${accessToken}`
     return http.request(retryConfig)
   } catch (refreshError) {
-    if (isTerminalRefreshFailure(refreshError)) {
+    if (refreshError instanceof SessionChangedError) {
+      await showReLogin(retryConfig.__authGeneration ?? getAuthGeneration(), refreshError.message, true)
+    } else if (isTerminalRefreshFailure(refreshError)) {
       // 业务请求的 401 通常带更精确的失效原因（被踢/被顶/会话失效），优先展示。
       const reason = extractInvalidMessage(error, refreshError)
       await showReLogin(retryConfig.__authGeneration ?? getAuthGeneration(), reason)
@@ -207,8 +214,13 @@ const handleError = (msg: string) => {
 http.interceptors.request.use(
   (config: AxiosRequestConfig) => {
     const refreshableConfig = config as RefreshableRequestConfig
+    const sessionId = getSessionId()
+    if (refreshableConfig.__authSessionId && refreshableConfig.__authSessionId !== sessionId) {
+      throw new SessionChangedError()
+    }
     if (refreshableConfig.__authGeneration === undefined) {
       refreshableConfig.__authGeneration = getAuthGeneration()
+      refreshableConfig.__authSessionId = sessionId
     }
     const accessToken = getAccessToken()
     if (!config.headers) {
@@ -234,6 +246,8 @@ http.interceptors.request.use(
 // 响应拦截器
 http.interceptors.response.use(
   (response: AxiosResponse) => {
+    const sessionId = (response.config as RefreshableRequestConfig).__authSessionId
+    if (sessionId && sessionId !== getSessionId()) throw new SessionChangedError()
     const { data } = response
     const { success, code, msg } = data
 
@@ -265,6 +279,7 @@ http.interceptors.response.use(
     return Promise.reject(new Error(msg || `请求失败（${code}）`))
   },
   async (error: AxiosError) => {
+    if (error instanceof SessionChangedError) throw error
     if (!error.response) {
       handleError('网络连接失败，请检查您的网络')
       return Promise.reject(error)

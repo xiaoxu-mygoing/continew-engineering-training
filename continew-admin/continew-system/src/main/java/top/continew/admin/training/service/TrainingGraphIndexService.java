@@ -44,7 +44,7 @@ class TrainingGraphIndexService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final TrainingGraphWorker worker;
-    private final TrainingDocumentService documents;
+    private final TrainingPrivacyCleanupService privacy;
     private final ScheduledExecutorService queue = Executors.newSingleThreadScheduledExecutor();
 
     @EventListener(ApplicationReadyEvent.class)
@@ -106,7 +106,7 @@ class TrainingGraphIndexService {
             + " WHERE id = ? AND version = ? AND graph_state = 'pending'", state, error, job.id(),
             job.version());
         if (changed == 0) {
-            documents.discardGraph(job.id(), job.version());
+            privacy.enqueueGraph(job.id(), job.version());
         }
     }
 }

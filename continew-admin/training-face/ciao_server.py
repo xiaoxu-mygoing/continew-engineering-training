@@ -22,13 +22,25 @@ from service.session_store import SessionStore
 
 HOME = Path(os.environ["TRAINING_FACE_HOME"])
 KEY = os.environ.get("FACE_SERVICE_API_KEY", "")
-store = SessionStore(30, 120, 20)
 capacity = threading.Lock()
+
+
+class ScopedSessionStore(SessionStore):
+    def invalidate_user(self, tenant, user):
+        with self._guard:
+            stale = [sid for sid, entry in self._sessions.items()
+                     if entry.auth.tenant == tenant and str(user) in entry.auth.database]
+            for sid in stale:
+                del self._sessions[sid]
+
+
+store = ScopedSessionStore(30, 120, 20)
 
 
 class ScopedSession(AuthSession):
     def __init__(self, tenant, user):
         super().__init__("login", db_path=HOME / "unused.json")
+        self.tenant = tenant
         process({"op": "status", "tenant": tenant, "user": 0}, HOME)
         with closing(sqlite3.connect(HOME / "private" / "templates-insightface.sqlite3")) as db:
             import sqlite_vec
@@ -142,6 +154,11 @@ def worker(req: dict, x_api_key: str = Header(default="")):
                 result = entry.auth.accept(req["image"])
                 if result["done"]:
                     store.mark_done(req["sessionId"])
+                return {"data": result}
+        if op == "purge":
+            with capacity:
+                result = process(req, HOME)
+                store.invalidate_user(int(req["tenant"]), int(req["user"]))
                 return {"data": result}
         if op not in {"status", "quality", "bind", "unbind", "enable", "disable", "verify", "identify"}:
             raise FaceError("操作无效")

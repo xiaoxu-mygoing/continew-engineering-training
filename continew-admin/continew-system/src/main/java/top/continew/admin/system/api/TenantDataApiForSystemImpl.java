@@ -50,6 +50,7 @@ import top.continew.admin.system.model.entity.user.UserDO;
 import top.continew.admin.system.service.FileService;
 import top.continew.admin.system.service.RoleMenuService;
 import top.continew.admin.system.service.UserRoleService;
+import top.continew.admin.training.service.TrainingPrivacyCleanupService;
 import top.continew.starter.auth.refresh.token.service.SessionInvalidationService;
 import top.continew.starter.core.util.CollUtils;
 import top.continew.starter.extension.tenant.context.TenantContextHolder;
@@ -87,6 +88,7 @@ public class TenantDataApiForSystemImpl implements TenantDataApi {
     private final UserRoleMapper userRoleMapper;
     private final UserSocialMapper userSocialMapper;
     private final SessionInvalidationService sessionInvalidationService;
+    private final TrainingPrivacyCleanupService privacy;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -135,7 +137,11 @@ public class TenantDataApiForSystemImpl implements TenantDataApi {
         roleDeptMapper.delete(queryWrapper);
         roleMenuMapper.delete(queryWrapper);
         // 用户数据清除
+        List<Long> userIds =
+            userMapper.selectList(Wrappers.<UserDO>lambdaQuery().select(UserDO::getId))
+                .stream().map(UserDO::getId).toList();
         userMapper.delete(queryWrapper);
+        privacy.removeAccounts(userIds);
         userPasswordHistoryMapper.delete(queryWrapper);
         userRoleMapper.delete(queryWrapper);
         userSocialMapper.delete(queryWrapper);

@@ -1,9 +1,12 @@
 <template>
   <a-card title="我的资料" class="general-card">
     <template #extra>
-      <a-space>
+      <a-space wrap>
         <a-button size="small" :disabled="busy" @click="refresh()">刷新</a-button>
-        <a-button type="primary" size="small" :disabled="busy" @click="chooseFile()">上传资料</a-button>
+        <a-button size="small" status="danger" :disabled="busy || !selectedDocs.length" @click="confirmBatchDelete">
+          批量删除<template v-if="selectedDocs.length">（{{ selectedDocs.length }}）</template>
+        </a-button>
+        <a-button type="primary" size="small" :disabled="busy" @click="uploadPicker?.click()">上传资料</a-button>
       </a-space>
     </template>
     <a-space class="hint" wrap>
@@ -14,14 +17,23 @@
         <a-radio value="both">同时构建</a-radio>
       </a-radio-group>
     </a-space>
-    <input ref="picker" type="file" hidden accept=".txt,.pdf,.docx" @change="onFile" />
+    <input ref="uploadPicker" type="file" hidden multiple accept=".txt,.pdf,.docx" @change="onFile($event)" />
+    <input ref="replacePicker" type="file" hidden accept=".txt,.pdf,.docx" @change="onFile($event, replacement)" />
     <p class="hint">
-      仅自己可见 · PDF、DOCX 或 TXT · 每份最多 5 MB。按选择的方式自动建立索引，替换文件沿用该文件原有方式。
+      仅自己可见 · 支持多选 PDF、DOCX 或 TXT · 每份最多 5 MB。按选择的方式自动建立索引，替换文件沿用该文件原有方式。
       <a :href="sampleUrl" download="工程实训器材借用指南.txt">下载示例 TXT</a>
     </p>
+    <p v-if="progress" class="hint" role="status">正在{{ progress.action }}（{{ progress.done }}/{{ progress.total }}）</p>
+    <a-alert v-if="batchIssue" class="hint" type="warning" closable @close="batchIssue = undefined">
+      {{ batchIssue.summary }}
+      <ul class="batch-failures">
+        <li v-for="(failure, index) in batchIssue.failures" :key="index">{{ failure }}</li>
+      </ul>
+    </a-alert>
     <a-table
-      class="document-table" size="small"
-      :data="documents" row-key="documentId" :loading="busy" :scroll="{ x: 640 }"
+      v-model:selected-keys="selectedKeys" class="document-table" size="small"
+      :data="documents" row-key="documentId" :loading="busy" :scroll="{ x: 680 }"
+      :row-selection="{ type: 'checkbox', showCheckedAll: true, width: 40 }"
       :pagination="{ pageSize: 8, hideOnSinglePage: true }"
     >
       <template #columns>
@@ -68,7 +80,7 @@
               <a-link :disabled="busy || (record.indexState !== 'ready' && record.graphState !== 'ready')" @click="questionDoc = record">问答</a-link>
               <a-link :disabled="busy || record.graphState !== 'ready'" @click="openGraph(record)">图谱</a-link>
               <a-link :disabled="busy" @click="useDownload(() => downloadDocument(record), record.fileName)">下载</a-link>
-              <a-link :disabled="busy" @click="chooseFile(record)">替换</a-link>
+              <a-link :disabled="busy" @click="chooseReplacement(record)">替换</a-link>
               <a-popconfirm :content="`删除《${record.fileName}》？`" @ok="remove(record)">
                 <a-link status="danger" :disabled="busy">删除</a-link>
               </a-popconfirm>
@@ -95,15 +107,21 @@
 
 <script setup lang="ts">
 import dayjs from 'dayjs'
-import { Message } from '@arco-design/web-vue'
+import { Message, Modal } from '@arco-design/web-vue'
 import DocumentQuestion from './DocumentQuestion.vue'
 import GraphCanvas from './GraphCanvas.vue'
 import type FilePreview from '@/components/FilePreview/index.vue'
+import { SessionChangedError, getSessionId } from '@/features/auth-session/access-token'
 import { useDownload } from '@/hooks'
 import { type BuildMode, type GraphEdge, type GraphNode, type TrainingDocument, deleteDocument, downloadDocument, fetchDocumentGraph, listDocuments, retryIndex, saveDocument } from '@/apis/training/documents'
 
 const emit = defineEmits<{ documents: [rows: TrainingDocument[]] }>()
 const documents = ref<TrainingDocument[]>([])
+const selectedKeys = ref<(string | number)[]>([])
+const selectedDocs = computed(() => {
+  const keys = new Set(selectedKeys.value)
+  return documents.value.filter((doc) => keys.has(doc.documentId))
+})
 const buildMode = ref<BuildMode>('both')
 const statusText = { disabled: '未启用', ready: '可问答', pending: '建立中', failed: '失败' }
 const questionDoc = ref<TrainingDocument>()
@@ -113,9 +131,14 @@ const graphNodes = ref<GraphNode[]>([])
 const graphEdges = ref<GraphEdge[]>([])
 const graphPicked = ref<GraphEdge>()
 const sampleUrl = `${import.meta.env.BASE_URL}training/lab-guide.txt`
-const picker = ref<HTMLInputElement>()
+const uploadPicker = ref<HTMLInputElement>()
+const replacePicker = ref<HTMLInputElement>()
 const replacement = ref<TrainingDocument>()
-const busy = ref(false)
+const loading = ref(false)
+const working = ref(false)
+const busy = computed(() => loading.value || working.value)
+const progress = ref<{ action: string, done: number, total: number }>()
+const batchIssue = ref<{ summary: string, failures: string[] }>()
 const loadFailed = ref(false)
 const officePreview = ref<InstanceType<typeof FilePreview>>()
 const officePreviewComponent = shallowRef<typeof FilePreview>()
@@ -130,11 +153,13 @@ let requestNumber = 0
 async function refresh(silent = false) {
   const sequence = ++requestNumber
   clearTimeout(poll)
-  if (!silent) busy.value = true
+  if (!silent) loading.value = true
   try {
     const rows = (await listDocuments()).data
     if (disposed || sequence !== requestNumber) return
     documents.value = rows
+    const visibleIds = new Set<string | number>(rows.map((doc) => doc.documentId))
+    selectedKeys.value = selectedKeys.value.filter((key) => visibleIds.has(key))
     emit('documents', rows)
     if (rows.some((doc) => doc.indexState === 'pending' || doc.graphState === 'pending')) poll = setTimeout(() => refresh(true), 2500)
     loadFailed.value = false
@@ -144,7 +169,7 @@ async function refresh(silent = false) {
     emit('documents', [])
     loadFailed.value = true
   } finally {
-    if (sequence === requestNumber) busy.value = false
+    if (sequence === requestNumber) loading.value = false
   }
 }
 
@@ -153,41 +178,86 @@ async function reindex(doc: TrainingDocument) {
   await refresh()
 }
 
-function chooseFile(doc?: TrainingDocument) {
+function chooseReplacement(doc: TrainingDocument) {
+  if (busy.value) return
   replacement.value = doc
-  picker.value?.click()
+  replacePicker.value?.click()
 }
 
-async function onFile(event: Event) {
+async function runBatch<T>(action: string, items: T[], name: (item: T) => string, perform: (item: T) => Promise<unknown>) {
+  if (disposed || busy.value || !items.length) return
+  const session = getSessionId()
+  const isCurrent = () => !disposed && getSessionId() === session
+  const failures: string[] = []
+  let succeeded = 0
+  working.value = true
+  batchIssue.value = undefined
+  progress.value = { action, done: 0, total: items.length }
+  clearTimeout(poll)
+  requestNumber++
+  try {
+    for (const item of items) {
+      if (!isCurrent()) return
+      try {
+        await perform(item)
+        succeeded++
+      } catch (error) {
+        if (error instanceof SessionChangedError || !isCurrent()) return
+        const reason = error instanceof Error ? error.message : '请稍后重试'
+        failures.push(`${name(item)}：${reason}`)
+      }
+      progress.value.done++
+    }
+    if (!isCurrent()) return
+    if (failures.length) {
+      batchIssue.value = { summary: `${action}成功 ${succeeded} 项，失败 ${failures.length} 项。`, failures }
+    } else {
+      Message.success(`已${action} ${succeeded} 份资料`)
+    }
+  } finally {
+    try {
+      if (isCurrent()) await refresh()
+    } finally {
+      progress.value = undefined
+      working.value = false
+    }
+  }
+}
+
+function onFile(event: Event, original?: TrainingDocument) {
   const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
+  const files = Array.from(input.files || [])
   input.value = ''
-  if (!file) return
-  if (!/\.(pdf|docx|txt)$/i.test(file.name) || !file.size || file.size > 5 * 1024 * 1024) {
-    Message.warning('请选择不超过 5 MB 的非空 PDF、DOCX 或 TXT 文件')
-    return
-  }
-  busy.value = true
-  try {
-    await saveDocument(file, replacement.value, replacement.value ? undefined : buildMode.value)
-    Message.success(replacement.value ? '资料已更新' : '资料已上传')
-  } finally {
-    await refresh()
-  }
+  const mode = buildMode.value
+  return runBatch(original ? '更新' : '上传', files, (file) => file.name, async (file) => {
+    if (!/\.(pdf|docx|txt)$/i.test(file.name) || !file.size || file.size > 5 * 1024 * 1024) {
+      throw new Error('请选择不超过 5 MB 的非空 PDF、DOCX 或 TXT 文件')
+    }
+    await saveDocument(file, original, original ? undefined : mode)
+  })
 }
 
-async function remove(doc: TrainingDocument) {
-  busy.value = true
-  try {
-    await deleteDocument(doc)
-    Message.success('资料已删除')
-  } finally {
-    await refresh()
-  }
+function confirmBatchDelete() {
+  const targets = selectedDocs.value
+  if (busy.value || !targets.length) return
+  const session = getSessionId()
+  Modal.warning({
+    title: '批量删除资料',
+    content: `确定删除已勾选的 ${targets.length} 份资料？对应的问答索引和图谱也会被清理。`,
+    okText: '确认删除',
+    hideCancel: false,
+    maskClosable: false,
+    okButtonProps: { status: 'danger' },
+    onOk: () => {
+      if (getSessionId() === session) return runBatch('删除', targets, (doc) => doc.fileName, deleteDocument)
+    },
+  })
 }
+
+const remove = (doc: TrainingDocument) => runBatch('删除', [doc], (item) => item.fileName, deleteDocument)
 
 async function preview(doc: TrainingDocument) {
-  busy.value = true
+  working.value = true
   try {
     const blob: Blob = (await downloadDocument(doc)).data
     const fileType = doc.fileName.split('.').pop()?.toLowerCase()
@@ -201,7 +271,7 @@ async function preview(doc: TrainingDocument) {
       officePreview.value?.onPreview({ fileInfo: { fileType, fileName: doc.fileName, data: blob } })
     }
   } finally {
-    busy.value = false
+    working.value = false
   }
 }
 
@@ -236,6 +306,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .hint { margin: 0 0 16px; color: var(--color-text-3); }
+.batch-failures { max-height: 144px; overflow: auto; margin: 6px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
 .document-table :deep(.arco-table-th-title) { white-space: nowrap; }
 .document-table :deep(.arco-table-cell) { padding-left: 8px; padding-right: 8px; }
 .document-table :deep(.arco-link) { white-space: nowrap; }

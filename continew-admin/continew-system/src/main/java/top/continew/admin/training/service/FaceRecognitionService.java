@@ -107,6 +107,29 @@ public class FaceRecognitionService {
         if (!serviceUrl.isBlank()) {
             return remote(req, timeoutSeconds);
         }
+        return local(req, tenant, timeoutSeconds);
+    }
+
+    boolean cleanupConfigured() {
+        return !serviceUrl.isBlank() || !home.isBlank();
+    }
+
+    void purge(long tenant, long user) {
+        ObjectNode req =
+            mapper.createObjectNode().put("op", "purge").put("tenant", tenant).put("user", user);
+        if (!serviceUrl.isBlank()) {
+            remote(req, 15);
+        }
+        if (!home.isBlank()) {
+            Path store = Path.of(home, "private", "templates.sqlite3");
+            if (!Files.notExists(store)
+                || (serviceUrl.isBlank() && !Files.notExists(store.getParent()))) {
+                local(req, tenant, 15);
+            }
+        }
+    }
+
+    private JsonNode local(ObjectNode req, Long tenant, int timeoutSeconds) {
         if (tenant == null || home.isBlank() || script.isBlank()
             || !Files.isRegularFile(Path.of(script))) {
             throw new BusinessException("本地人脸识别服务未就绪，请使用密码登录");

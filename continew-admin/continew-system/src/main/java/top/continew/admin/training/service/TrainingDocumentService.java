@@ -18,18 +18,15 @@ package top.continew.admin.training.service;
 
 import cn.dev33.satoken.stp.StpUtil;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import top.continew.admin.common.context.UserContextHolder;
 import top.continew.starter.core.exception.BusinessException;
 import top.continew.starter.extension.tenant.context.TenantContextHolder;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
@@ -43,7 +40,6 @@ import java.util.UUID;
  * @since 4.2.0
  */
 @Service
-@Slf4j
 @RequiredArgsConstructor
 public class TrainingDocumentService {
 
@@ -51,8 +47,7 @@ public class TrainingDocumentService {
     private static final String CURRENT_DOCUMENT = SCOPE + " AND id = ? AND version = ?";
     private static final Set<String> EXTENSIONS = Set.of("txt", "pdf", "docx");
     private final JdbcTemplate jdbc;
-    @Value("${TRAINING_RAG_HOME:}")
-    private String ragHome;
+    private final TrainingPrivacyCleanupService cleanup;
 
     String currentName(String id, int version) {
         List<String> names = jdbc.query(
@@ -60,28 +55,6 @@ public class TrainingDocumentService {
             (row, index) -> row.getString(1), tenantId(), StpUtil.getLoginIdAsLong(), id, version);
         requireCurrent(names.size());
         return names.get(0);
-    }
-
-    void discardIndex(String id, int version) {
-        discard(ragHome, "index", id, version, "索引");
-    }
-
-    void discardGraph(String id, int version) {
-        jdbc.update("INSERT INTO training_graph_cleanup (document_id, version) VALUES (?, ?)", id,
-            version);
-    }
-
-    private void discard(String home, String dir, String id, int version, String label) {
-        if (home.isBlank() || !id.matches("[0-9a-f-]{36}")) {
-            return;
-        }
-        Path file = dir.isBlank() ? Path.of(home, id + "-v" + version + ".sqlite3")
-            : Path.of(home, dir, id + "-v" + version + ".sqlite3");
-        try {
-            Files.deleteIfExists(file);
-        } catch (IOException e) {
-            log.warn("旧版资料{}暂时无法清理", label);
-        }
     }
 
     public record DocumentInfo(String documentId, int version, String fileName, int fileSize,
@@ -115,15 +88,18 @@ public class TrainingDocumentService {
      * @return 资料编号
      * @throws IOException 文件读取失败
      */
+    @Transactional(rollbackFor = Exception.class)
     public String create(MultipartFile file, String mode) throws IOException {
         String name = validateFile(file);
         String id = UUID.randomUUID().toString();
         validateMode(mode);
+        long user = StpUtil.getLoginIdAsLong();
+        cleanup.requireActiveAccount(user);
         jdbc.update(
             "INSERT INTO training_document (id, tenant_id, owner_id, version, file_name, file_size, file_content,"
                 + " build_mode, index_state, graph_state)"
                 + " VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
-            id, tenantId(), StpUtil.getLoginIdAsLong(), name,
+            id, tenantId(), user, name,
             file.getSize(), file.getBytes(), mode, "graph".equals(mode) ? "disabled" : "pending",
             "rag".equals(mode) ? "disabled" : "pending");
         return id;
@@ -138,7 +114,7 @@ public class TrainingDocumentService {
      * @param file 新文件
      * @throws IOException 文件读取失败
      */
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void replace(String id, int version, MultipartFile file, String mode)
         throws IOException {
         String name = validateFile(file);
@@ -157,8 +133,8 @@ public class TrainingDocumentService {
             StpUtil.getLoginIdAsLong(), id,
             version);
         requireCurrent(count);
-        discardIndex(id, version);
-        discardGraph(id, version);
+        cleanup.enqueueVector(id, version);
+        cleanup.enqueueGraph(id, version);
     }
 
     /**
@@ -183,12 +159,12 @@ public class TrainingDocumentService {
      * @param id 资料编号
      * @param version 资料版本
      */
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void delete(String id, int version) {
         requireCurrent(jdbc.update("DELETE FROM training_document" + CURRENT_DOCUMENT, tenantId(),
             StpUtil.getLoginIdAsLong(), id, version));
-        discardIndex(id, version);
-        discardGraph(id, version);
+        cleanup.enqueueVector(id, version);
+        cleanup.enqueueGraph(id, version);
     }
 
     /**

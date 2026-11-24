@@ -35,6 +35,17 @@ class TemplateLifecycleTest(unittest.TestCase):
             with self.assertRaises(worker.FaceError):
                 self.call("verify", **scope)
 
+    def test_purge_is_idempotent_and_prevents_late_enrollment(self):
+        self.call("bind")
+        self.call("enable", version=1)
+        self.call("bind", tenant=3)
+        self.assertTrue(self.call("purge")["deleted"])
+        self.assertTrue(self.call("purge")["deleted"])
+        self.assertEqual(0, self.call("status")["templateVersion"])
+        with self.assertRaisesRegex(worker.FaceError, "账号已删除"):
+            self.call("bind")
+        self.assertTrue(self.call("verify", tenant=3)["matched"])
+
     def test_replacement_and_unbinding_invalidate_old_credentials(self):
         self.call("bind")
         self.call("bind", version=1, image="1")

@@ -44,12 +44,12 @@ class TrainingIndexService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final TrainingRagWorker worker;
-    private final TrainingDocumentService documents;
+    private final TrainingPrivacyCleanupService cleanup;
     private final ScheduledExecutorService queue = Executors.newSingleThreadScheduledExecutor();
 
     @EventListener(ApplicationReadyEvent.class)
     void start() {
-        if (worker.configured()) {
+        if (worker.configured() || cleanup.vectorsConfigured()) {
             queue.scheduleWithFixedDelay(this::poll, 1, 2, TimeUnit.SECONDS);
         }
     }
@@ -64,6 +64,10 @@ class TrainingIndexService {
 
     private void poll() {
         try {
+            cleanup.purgeVectorJobs();
+            if (!worker.configured()) {
+                return;
+            }
             var jobs = jdbc.query(
                 "SELECT id, version, file_name, file_content FROM training_document"
                     + " WHERE index_state = 'pending' ORDER BY updated_at, id LIMIT 1",
@@ -94,7 +98,7 @@ class TrainingIndexService {
             + " WHERE id = ? AND version = ? AND index_state = 'pending'", state, error, job.id(),
             job.version());
         if (changed == 0) {
-            documents.discardIndex(job.id(), job.version());
+            cleanup.enqueueVector(job.id(), job.version());
         }
     }
 }

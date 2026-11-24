@@ -80,6 +80,9 @@ def process(req, home):
         from liveness import verify
         return verify(req, home / "models", decode, extract, FaceError)
     owner = (int(req["tenant"]), int(req["user"]))
+    database = home / "private" / "templates.sqlite3"
+    if op == "purge" and owner[1] <= 0:
+        raise FaceError("账号无效")
     if op == "quality":
         try:
             extract(req["image"], home / "models", quality_only=True)
@@ -87,7 +90,7 @@ def process(req, home):
         except FaceError as error:
             return {"hint": str(error)}
     vector = extract(req["image"], home / "models") if op in ("bind", "verify", "identify") else None
-    with closing(sqlite3.connect(home / "private" / "templates.sqlite3", timeout=5)) as db:
+    with closing(sqlite3.connect(database, timeout=5)) as db:
         db.enable_load_extension(True)
         sqlite_vec.load(db)
         db.enable_load_extension(False)
@@ -97,7 +100,9 @@ def process(req, home):
             version INTEGER NOT NULL, model TEXT, updated TEXT NOT NULL, UNIQUE(tenant,user))""")
         db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS face_vector USING vec0(embedding float[128])")
         db.execute("CREATE TABLE IF NOT EXISTS face_identification (binding_id INTEGER PRIMARY KEY)")
-        db.execute("BEGIN IMMEDIATE" if op in ("bind", "unbind", "enable", "disable") else "BEGIN")
+        db.execute("""CREATE TABLE IF NOT EXISTS retired_face_account (
+            tenant INTEGER NOT NULL, user INTEGER NOT NULL, PRIMARY KEY(tenant,user))""")
+        db.execute("BEGIN IMMEDIATE" if op in ("bind", "unbind", "enable", "disable", "purge") else "BEGIN")
         if op == "identify":
             hits = db.execute("""SELECT b.user, 1 - vec_distance_cosine(v.embedding, ?) AS score
                 FROM binding b JOIN face_identification i ON i.binding_id=b.id
@@ -110,6 +115,16 @@ def process(req, home):
             return {"userId": hits[0][0]}
         row = db.execute("""SELECT b.id,b.version,b.model,b.updated,i.binding_id FROM binding b
             LEFT JOIN face_identification i ON i.binding_id=b.id WHERE b.tenant=? AND b.user=?""", owner).fetchone()
+        if op == "purge":
+            db.execute("INSERT OR IGNORE INTO retired_face_account (tenant,user) VALUES (?,?)", owner)
+            if row:
+                db.execute("DELETE FROM face_identification WHERE binding_id=?", (row[0],))
+                db.execute("DELETE FROM face_vector WHERE rowid=?", (row[0],))
+                db.execute("DELETE FROM binding WHERE id=?", (row[0],))
+            db.commit()
+            return {"deleted": True}
+        if op == "bind" and db.execute("SELECT 1 FROM retired_face_account WHERE tenant=? AND user=?", owner).fetchone():
+            raise FaceError("账号已删除")
         version = row[1] if row else 0
         bound = bool(row and row[2])
         enabled = bool(bound and row[4] is not None)

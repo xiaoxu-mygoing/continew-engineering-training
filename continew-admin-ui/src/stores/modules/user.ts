@@ -20,6 +20,7 @@ import {
   socialLogin as socialLoginApi,
 } from '@/apis'
 import {
+  assertSameTabSession,
   clearAccessToken,
   getAccessToken,
   setAccessToken,
@@ -76,6 +77,7 @@ const storeSetup = () => {
     await withAuthLifecycleLock(async () => {
       if (getAccessToken()) return
       const res = await refreshTokenApi()
+      assertSameTabSession(res.data.accessToken)
       saveLoginState(res.data)
     })
     return true
