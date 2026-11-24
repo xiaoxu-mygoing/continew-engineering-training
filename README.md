@@ -38,7 +38,7 @@ powershell -ExecutionPolicy Bypass -File .\Start-Team.ps1 -Native
 
 ## 按需启用课程功能
 
-- **人脸识别**：安装 64 位 Python 3.11 或 3.12，确认 `py --version`，启动命令追加 `-Face`。脚本创建虚拟环境，下载并校验检测和识别模型。浏览器使用 localhost，并允许摄像头。首次或升级安装会准备 MediaPipe 和约 3.6 MB 的活体动作模型。操作与边界见[活体检测验收说明](人脸活体检测验收.md)。
+- **人脸识别**：安装 64 位 Python 3.11 或 3.12，确认 `py --version`，启动命令追加 `-Face`。脚本创建虚拟环境，下载并校验检测和识别模型。浏览器使用 localhost，并允许摄像头。当前分支采用组员的 InsightFace 会话式逐帧识别，模型约 275 MB，旧人脸模板需要重新录入；Windows 安装 InsightFace 可能需要 C++ Build Tools。操作与边界见[活体检测验收说明](人脸活体检测验收.md)。
 - **私人资料问答**：安装 Python 和 Ollama，先启动 Ollama，再给启动命令追加 `-Rag`。脚本安装解析依赖并下载嵌入模型和问答模型。准备完毕后可用仓库中的 TXT、PDF、DOCX 验证。[问答演示步骤](任务2演示资料/资料问答使用说明.md)
 - 两个参数可以同时使用；原生数据库模式保留 `-Native`。已下载的模型下次启动无需重新安装。Dify 工作流模板随附在演示目录中，运行主项目无需安装 Dify。
 

@@ -61,6 +61,7 @@ class FaceLivenessServiceTest {
         when(redis.getBucket(anyString(), eq(StringCodec.INSTANCE))).thenAnswer(call -> {
             String key = call.getArgument(0);
             RBucket<String> bucket = mock(RBucket.class);
+            when(bucket.get()).thenAnswer(ignored -> values.get(key));
             when(bucket.getAndDelete()).thenAnswer(ignored -> values.remove(key));
             doAnswer(set -> {
                 values.put(key, set.getArgument(0));
@@ -72,6 +73,41 @@ class FaceLivenessServiceTest {
         when(recognition.liveness(any(), eq(0L)))
             .thenReturn(mapper.createObjectNode().put("passed", true));
         service = new FaceLivenessService(redis, mapper, recognition);
+    }
+
+    @Test
+    void streamingProofRequiresCompletedRecognitionAndCannotReplay() {
+        when(recognition.session(any(), eq(0L)))
+            .thenReturn(mapper.createObjectNode().put("sessionId", "remote"))
+            .thenReturn(mapper.createObjectNode().put("done", false).put("action", "turn"))
+            .thenReturn(mapper.createObjectNode().put("done", true).put("account", "123"));
+        String id = service.startSession("scope", 0L, 123L).path("sessionId").asText();
+        assertEquals(false, service.frame(id, "frame1", "scope", 0L).has("livenessToken"));
+        ObjectNode result = service.frame(id, "frame2", "scope", 0L);
+        assertEquals(false, result.has("account"));
+        String token = result.path("livenessToken").asText();
+        service.consume(token, "frame2", "scope");
+        assertThrows(BusinessException.class, () -> service.consume(token, "frame2", "scope"));
+        assertThrows(BusinessException.class, () -> service.frame(id, "frame2", "scope", 0L));
+    }
+
+    @Test
+    void streamingFailureDoesNotIssueProof() {
+        when(recognition.session(any(), eq(0L)))
+            .thenReturn(mapper.createObjectNode().put("sessionId", "remote"))
+            .thenReturn(mapper.createObjectNode().put("done", true).putNull("account"));
+        String id = service.startSession("scope", 0L, 123L).path("sessionId").asText();
+        assertEquals(false, service.frame(id, "frame", "scope", 0L).has("livenessToken"));
+        assertThrows(BusinessException.class, () -> service.frame(id, "frame", "scope", 0L));
+    }
+
+    @Test
+    void streamingContextChangeIsRejected() {
+        when(recognition.session(any(), eq(0L)))
+            .thenReturn(mapper.createObjectNode().put("sessionId", "remote"));
+        String id = service.startSession("scope", 0L, 123L).path("sessionId").asText();
+        assertThrows(BusinessException.class, () -> service.frame(id, "frame", "other", 0L));
+        verify(recognition).session(any(), eq(0L));
     }
 
     private String challenge(String scope) throws Exception {

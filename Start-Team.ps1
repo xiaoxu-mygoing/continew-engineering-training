@@ -26,13 +26,13 @@ if (!$Native) {
 } elseif (!$env:DB_USER -or !$env:DB_PWD -or !$env:REDIS_PWD) {
     throw 'Native mode requires DB_USER, DB_PWD and REDIS_PWD. See README.'
 }
-if ($Face) { & "$api/training-face/Setup-Face.ps1" }
+if ($Face) { & "$api/training-face/Start-CiaoFace.ps1" -Runtime "$rt/face-ciao" -Install }
 $env:TRAINING_RAG_HOME="$rt/rag"
 $env:TRAINING_RAG_PYTHON="$rt/rag/venv/Scripts/python.exe"
 if ($Rag -or $Graph) {
     if (!(Test-Path $env:TRAINING_RAG_PYTHON)) { py -m venv "$rt/rag/venv"; CheckExit 'Python venv' }
     & $env:TRAINING_RAG_PYTHON -m pip install -r "$api/training-rag/requirements.txt"; CheckExit 'RAG packages'
-    foreach ($model in 'qwen3-embedding:0.6b','qwen2.5:3b') { ollama pull $model; CheckExit 'Ollama model' }
+    foreach ($model in 'nomic-embed-text','qwen2.5:3b') { ollama pull $model; CheckExit 'Ollama model' }
 }
 if ($Graph -or (Test-Path "$rt/neo4j/credentials.json")) {
     & "$PSScriptRoot/Setup-Graph.ps1"
@@ -52,6 +52,9 @@ $env:SERVER_ADDRESS='127.0.0.1'
 $env:CONTINEWSTARTER_REFRESHTOKEN_COOKIEALLOWEDORIGINS='http://localhost:5173,http://127.0.0.1:5173'
 $env:TRAINING_FACE_HOME="$rt/face"
 $env:TRAINING_FACE_WORKER="$api/training-face/worker.py"
+if (Test-Path "$rt/face-ciao/venv/Scripts/python.exe") {
+    & "$api/training-face/Start-CiaoFace.ps1" -Runtime "$rt/face-ciao"
+}
 $env:TRAINING_RAG_WORKER="$api/training-rag/worker.py"
 if (!(Listening 8000)) {
     $backend = Start-Process java -ArgumentList '-Xmx1024m','-Dp6spy.config.filter=true','-Dp6spy.config.exclude=training_document','-jar',('"'+$jar+'"') -WorkingDirectory $rt -WindowStyle Hidden -PassThru -RedirectStandardOutput "$rt/backend.log" -RedirectStandardError "$rt/backend-errors.log"

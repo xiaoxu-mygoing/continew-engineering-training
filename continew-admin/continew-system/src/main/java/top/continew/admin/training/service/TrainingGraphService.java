@@ -18,6 +18,7 @@ package top.continew.admin.training.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import top.continew.admin.training.service.TrainingDocumentService.DocumentInfo;
@@ -63,12 +64,7 @@ public class TrainingGraphService {
                 throw new BusinessException("资料不可访问或版本已更新，请刷新列表");
             }
         }
-        for (DocumentInfo doc : available) {
-            if ("ready".equals(doc.graphState())) {
-                ready.addObject().put("documentId", doc.documentId()).put("version", doc.version())
-                    .put("fileName", doc.fileName());
-            }
-        }
+        addReadyDocuments(available, ready);
         if (ready.isEmpty()) {
             throw new BusinessException("暂无可检索的资料图谱，请查看图谱状态");
         }
@@ -77,6 +73,43 @@ public class TrainingGraphService {
             documents.currentName(doc.path("documentId").asText(), doc.path("version").asInt());
         }
         return answer;
+    }
+
+    /**
+     * 统计或读取当前账号所有已就绪的图谱版本。
+     *
+     * @param includeGraph 是否加载完整节点和关系
+     * @return 图谱或统计数据
+     */
+    public JsonNode overview(boolean includeGraph) {
+        var req = mapper.createObjectNode().put("op", "library_graph")
+            .put("includeGraph", includeGraph);
+        var ready = req.putArray("documents");
+        addReadyDocuments(documents.list(), ready);
+        if (ready.isEmpty()) {
+            var empty = mapper.createObjectNode();
+            if (includeGraph) {
+                empty.putArray("nodes");
+                empty.putArray("edges");
+            } else {
+                empty.put("entityCount", 0).put("relationCount", 0).put("documentCount", 0);
+            }
+            return empty;
+        }
+        JsonNode result = worker.run(req, 60);
+        for (JsonNode doc : ready) {
+            documents.currentName(doc.path("documentId").asText(), doc.path("version").asInt());
+        }
+        return result;
+    }
+
+    private static void addReadyDocuments(List<DocumentInfo> available, ArrayNode ready) {
+        for (DocumentInfo doc : available) {
+            if ("ready".equals(doc.graphState())) {
+                ready.addObject().put("documentId", doc.documentId()).put("version", doc.version())
+                    .put("fileName", doc.fileName());
+            }
+        }
     }
 
     /**

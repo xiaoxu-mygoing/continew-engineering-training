@@ -54,6 +54,64 @@ public class FaceLivenessService {
     }
 
     /**
+     * 创建带登录范围约束的逐帧会话。
+     * @param scope 登录范围
+     * @param tenant 租户
+     * @param user 指定用户，零表示已授权的一对多识别
+     * @return 会话编号
+     * @since 4.2.0
+     */
+    public ObjectNode startSession(String scope, Long tenant, long user) {
+        JsonNode remote = recognition.session(mapper.createObjectNode()
+            .put("op", "session_start").put("user", user), tenant);
+        String id = UUID.randomUUID().toString();
+        ObjectNode state = mapper.createObjectNode().put("scope", scope)
+            .put("remote", remote.path("sessionId").asText());
+        bucket("stream", id).set(state.toString(), Duration.ofSeconds(120));
+        return mapper.createObjectNode().put("sessionId", id);
+    }
+
+    /**
+     * 推进组员的动作状态机，通过后签发绑定当前帧的一次性凭证。
+     * @param id 会话编号
+     * @param image 当前帧
+     * @param scope 登录范围
+     * @param tenant 租户
+     * @return 动作提示或凭证
+     * @since 4.2.0
+     */
+    public ObjectNode frame(String id, String image, String scope, Long tenant) {
+        String raw = bucket("stream", id).get();
+        if (raw == null) {
+            throw new BusinessException("人脸会话已过期，请重新验证");
+        }
+        try {
+            JsonNode state = mapper.readTree(raw);
+            if (!scope.equals(state.path("scope").asText())) {
+                throw new BusinessException("登录信息已变化，请重新验证");
+            }
+            ObjectNode result = recognition.session(mapper.createObjectNode()
+                .put("op", "session_frame").put("sessionId", state.path("remote").asText())
+                .put("image", image), tenant).deepCopy();
+            if (result.path("done").asBoolean()) {
+                take("stream", id, scope);
+                if (!result.path("account").isNull()
+                    && !result.path("account").asText().isBlank()) {
+                    String proof = UUID.randomUUID().toString();
+                    ObjectNode ticket = mapper.createObjectNode().put("scope", scope)
+                        .put("imageHash", DigestUtil.sha256Hex(image));
+                    bucket("proof", proof).set(ticket.toString(), Duration.ofSeconds(20));
+                    result.put("livenessToken", proof);
+                }
+            }
+            result.remove("account");
+            return result;
+        } catch (java.io.IOException e) {
+            throw new BusinessException("人脸会话无效");
+        }
+    }
+
+    /**
      * 生成绑定登录上下文的短期随机挑战。
      * @param scope 登录上下文摘要
      * @return 挑战

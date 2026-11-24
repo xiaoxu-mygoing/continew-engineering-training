@@ -17,7 +17,7 @@ def graph(doc_id, text):
 
 class GraphRegressionTests(unittest.TestCase):
     def setUp(self):
-        patcher = patch.object(worker, "embeddings", return_value=[[0.0] * 1024])
+        patcher = patch.object(worker, "embeddings", return_value=[[0.0] * worker.DIMENSION])
         patcher.start()
         self.addCleanup(patcher.stop)
 

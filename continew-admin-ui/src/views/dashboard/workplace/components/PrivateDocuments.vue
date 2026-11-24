@@ -2,12 +2,11 @@
   <a-card title="我的资料" class="general-card">
     <template #extra>
       <a-space>
-        <a-button size="small" :disabled="!documents.some((doc) => doc.indexState === 'ready' || doc.graphState === 'ready')" @click="libraryOpen = true">资料库问答</a-button>
         <a-button size="small" :disabled="busy" @click="refresh()">刷新</a-button>
         <a-button type="primary" size="small" :disabled="busy" @click="chooseFile()">上传资料</a-button>
       </a-space>
     </template>
-    <a-space class="hint">
+    <a-space class="hint" wrap>
       <span>上传资料的建库方式</span>
       <a-radio-group v-model="buildMode" :disabled="busy">
         <a-radio value="rag">RAG</a-radio>
@@ -21,15 +20,16 @@
       <a :href="sampleUrl" download="工程实训器材借用指南.txt">下载示例 TXT</a>
     </p>
     <a-table
-      :data="documents" row-key="documentId" :loading="busy" :scroll="{ x: 740 }"
+      class="document-table" size="small"
+      :data="documents" row-key="documentId" :loading="busy" :scroll="{ x: 640 }"
       :pagination="{ pageSize: 8, hideOnSinglePage: true }"
     >
       <template #columns>
-        <a-table-column title="资料名称" data-index="fileName" ellipsis tooltip />
-        <a-table-column title="版本" :width="62">
+        <a-table-column title="资料名称" data-index="fileName" :width="140" ellipsis tooltip />
+        <a-table-column title="版本" :width="50">
           <template #cell="{ record }">v{{ record.version }}</template>
         </a-table-column>
-        <a-table-column title="问答索引" :width="145">
+        <a-table-column title="问答索引" :width="110">
           <template #cell="{ record }">
             <a-space size="mini">
               <a-tooltip :content="record.indexError || statusText[record.indexState as TrainingDocument['indexState']]">
@@ -43,7 +43,7 @@
             </a-space>
           </template>
         </a-table-column>
-        <a-table-column title="图谱" :width="130">
+        <a-table-column title="图谱" :width="90">
           <template #cell="{ record }">
             <a-tooltip :content="record.graphError || statusText[record.graphState as TrainingDocument['graphState']]">
               <a-tag :color="record.graphState === 'failed' ? 'red' : record.graphState === 'ready' ? 'green' : 'blue'">
@@ -55,12 +55,15 @@
             </a-link>
           </template>
         </a-table-column>
-        <a-table-column title="更新时间" :width="148">
-          <template #cell="{ record }">{{ dayjs(record.updatedAt).format('YYYY-MM-DD HH:mm') }}</template>
-        </a-table-column>
-        <a-table-column title="操作" :width="280">
+        <a-table-column title="更新时间" :width="108">
           <template #cell="{ record }">
-            <a-space size="mini">
+            <span class="updated-date">{{ dayjs(record.updatedAt).format('YYYY-MM-DD') }}</span>
+            <span class="updated-date">{{ dayjs(record.updatedAt).format('HH:mm') }}</span>
+          </template>
+        </a-table-column>
+        <a-table-column title="操作" :width="142">
+          <template #cell="{ record }">
+            <div class="document-actions">
               <a-link :disabled="busy" @click="preview(record)">预览</a-link>
               <a-link :disabled="busy || (record.indexState !== 'ready' && record.graphState !== 'ready')" @click="questionDoc = record">问答</a-link>
               <a-link :disabled="busy || record.graphState !== 'ready'" @click="openGraph(record)">图谱</a-link>
@@ -69,7 +72,7 @@
               <a-popconfirm :content="`删除《${record.fileName}》？`" @ok="remove(record)">
                 <a-link status="danger" :disabled="busy">删除</a-link>
               </a-popconfirm>
-            </a-space>
+            </div>
           </template>
         </a-table-column>
       </template>
@@ -78,7 +81,6 @@
       </template>
     </a-table>
     <component :is="officePreviewComponent" v-if="officePreviewComponent" ref="officePreview" />
-    <DocumentQuestion v-if="libraryOpen" @close="libraryOpen = false" />
     <DocumentQuestion v-if="questionDoc" :doc="questionDoc" @close="questionDoc = undefined" />
     <a-modal v-model:visible="graphOpen" :title="graphTitle" :width="720" :footer="false" @cancel="closeGraph">
       <GraphCanvas :nodes="graphNodes" :edges="graphEdges" height="380px" @pick="graphPicked = $event" />
@@ -100,8 +102,8 @@ import type FilePreview from '@/components/FilePreview/index.vue'
 import { useDownload } from '@/hooks'
 import { type BuildMode, type GraphEdge, type GraphNode, type TrainingDocument, deleteDocument, downloadDocument, fetchDocumentGraph, listDocuments, retryIndex, saveDocument } from '@/apis/training/documents'
 
+const emit = defineEmits<{ documents: [rows: TrainingDocument[]] }>()
 const documents = ref<TrainingDocument[]>([])
-const libraryOpen = ref(false)
 const buildMode = ref<BuildMode>('both')
 const statusText = { disabled: '未启用', ready: '可问答', pending: '建立中', failed: '失败' }
 const questionDoc = ref<TrainingDocument>()
@@ -133,11 +135,13 @@ async function refresh(silent = false) {
     const rows = (await listDocuments()).data
     if (disposed || sequence !== requestNumber) return
     documents.value = rows
+    emit('documents', rows)
     if (rows.some((doc) => doc.indexState === 'pending' || doc.graphState === 'pending')) poll = setTimeout(() => refresh(true), 2500)
     loadFailed.value = false
   } catch {
     if (disposed || sequence !== requestNumber) return
     documents.value = []
+    emit('documents', [])
     loadFailed.value = true
   } finally {
     if (sequence === requestNumber) busy.value = false
@@ -232,5 +236,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .hint { margin: 0 0 16px; color: var(--color-text-3); }
+.document-table :deep(.arco-table-th-title) { white-space: nowrap; }
+.document-table :deep(.arco-table-cell) { padding-left: 8px; padding-right: 8px; }
+.document-table :deep(.arco-link) { white-space: nowrap; }
+.document-actions { display: grid; grid-template-columns: repeat(3, max-content); gap: 2px 4px; }
+.updated-date { display: block; white-space: nowrap; }
 .text-preview { max-height: 60vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>

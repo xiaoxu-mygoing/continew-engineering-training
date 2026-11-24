@@ -17,12 +17,16 @@
 package top.continew.admin.training.controller;
 
 import cn.dev33.satoken.annotation.SaIgnore;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import top.continew.admin.system.model.entity.user.UserDO;
+import top.continew.admin.system.service.UserService;
 import top.continew.admin.training.service.FaceLivenessService;
+import top.continew.starter.core.exception.BusinessException;
 import top.continew.starter.extension.tenant.context.TenantContextHolder;
 import top.continew.starter.log.annotation.Log;
 import top.continew.starter.ratelimiter.annotation.RateLimiter;
@@ -51,6 +55,52 @@ import java.util.concurrent.TimeUnit;
 public class FaceLivenessController {
 
     private final FaceLivenessService liveness;
+    private final UserService userService;
+
+    public record FrameRequest(@NotBlank @Size(max = 36) String sessionId,
+        @NotNull @Valid Context context, @NotBlank @Size(max = 450000) String image) {
+    }
+
+    /**
+     * 开启新版逐帧识别。
+     * @param context 登录信息
+     * @param request 请求
+     * @return 会话编号
+     * @since 4.2.0
+     */
+    @PostMapping("/session")
+    @RateLimiter(name = "training:face:stream:start", rate = 8, interval = 1,
+        unit = TimeUnit.MINUTES, type = LimitType.IP, message = "尝试过于频繁，请稍后重试")
+    public ObjectNode session(@RequestBody @Valid Context context, HttpServletRequest request) {
+        String contextScope = scope(context, request);
+        long id = 0;
+        if (!context.identify()) {
+            UserDO user = userService.getByUsername(context.username().trim());
+            if (user == null) {
+                throw new BusinessException("请检查账号及人脸绑定状态");
+            }
+            id = user.getId();
+        }
+        return liveness.startSession(contextScope, tenant(), id);
+    }
+
+    /**
+     * 逐帧判断动作与身份。
+     * @param input 当前帧
+     * @param request 请求
+     * @param response 响应
+     * @return 状态提示
+     * @since 4.2.0
+     */
+    @PostMapping("/frame")
+    @RateLimiter(name = "training:face:stream:frame", rate = 360, interval = 1,
+        unit = TimeUnit.MINUTES, type = LimitType.IP, message = "检测过于频繁，请稍后重试")
+    public ObjectNode frame(@RequestBody @Valid FrameRequest input, HttpServletRequest request,
+        HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+        return liveness.frame(input.sessionId(), input.image(), scope(input.context(), request),
+            tenant());
+    }
 
     public record Context(@NotBlank @Size(max = 64) String clientId, boolean identify,
         @Size(max = 64) String username) {

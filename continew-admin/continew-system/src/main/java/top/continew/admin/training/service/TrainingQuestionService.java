@@ -50,8 +50,16 @@ public class TrainingQuestionService {
      * @return 答案和来源
      */
     public JsonNode ask(String id, int version, String question) {
+        return retrieve(id, version, question, false);
+    }
+
+    public JsonNode search(String query) {
+        return retrieve(null, 0, query, true);
+    }
+
+    private JsonNode retrieve(String id, int version, String question, boolean searchOnly) {
         if (question == null || question.isBlank() || question.length() > 500) {
-            throw new BusinessException("请输入 1 至 500 字的问题");
+            throw new BusinessException("请输入 1 至 500 字的内容");
         }
         List<DocumentInfo> available = documents.list();
         if (id != null) {
@@ -61,7 +69,9 @@ public class TrainingQuestionService {
                 throw new BusinessException("资料不可访问或版本已更新，请刷新列表");
             }
         }
-        var req = mapper.createObjectNode().put("op", "ask").put("question", question.trim());
+        boolean allowGeneral = id == null && !searchOnly;
+        var req = mapper.createObjectNode().put("op", searchOnly ? "search" : "ask")
+            .put("question", question.trim()).put("allowGeneral", allowGeneral);
         var ready = req.putArray("documents");
         for (DocumentInfo doc : available) {
             if ("ready".equals(doc.indexState())) {
@@ -69,15 +79,21 @@ public class TrainingQuestionService {
                     .put("fileName", doc.fileName());
             }
         }
-        if (ready.isEmpty()) {
+        if (ready.isEmpty() && !allowGeneral) {
+            if (searchOnly) {
+                var empty = mapper.createObjectNode();
+                empty.putArray("results");
+                return empty;
+            }
             throw new BusinessException("暂无可问答的资料，请查看索引状态");
         }
         if (!slot.tryAcquire()) {
             throw new BusinessException("本地问答正在处理其他问题，请稍后重试");
         }
         try {
-            JsonNode answer = worker.run(req, 210);
-            for (JsonNode source : answer.path("sources")) {
+            int timeout = allowGeneral ? 255 : 210;
+            JsonNode answer = worker.run(req, searchOnly ? 75 : timeout);
+            for (JsonNode source : answer.path(searchOnly ? "results" : "sources")) {
                 documents.currentName(source.path("documentId").asText(),
                     source.path("version").asInt());
             }

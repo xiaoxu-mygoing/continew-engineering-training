@@ -68,6 +68,13 @@ public class TrainingGraphController {
             input.question());
     }
 
+    @GetMapping("/overview")
+    public JsonNode overview(@RequestParam(defaultValue = "false") boolean includeGraph,
+        HttpServletResponse response) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "private, no-store");
+        return graph.overview(includeGraph);
+    }
+
     /**
      * 返回单份资料当前版本的节点与关系。
      *

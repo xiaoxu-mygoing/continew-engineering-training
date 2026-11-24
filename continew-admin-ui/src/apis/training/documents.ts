@@ -27,7 +27,7 @@ export interface DocumentSource {
 }
 
 export interface DocumentAnswer {
-  workflow?: { route: 'answered' | 'unverified' | 'no_match', documents: number, candidates: number, citations: number }
+  workflow?: { route: 'answered' | 'unverified' | 'no_match' | 'general', documents: number, candidates: number, citations: number }
   answer: string
   sources: DocumentSource[]
 }
@@ -71,11 +71,25 @@ export interface DocumentGraph {
   edges: GraphEdge[]
 }
 
+export interface GraphStats {
+  entityCount: number
+  relationCount: number
+  documentCount: number
+}
+
+export const searchLibrary = (query: string) =>
+  http.post<{ results: DocumentSource[] }>(`${base}/search`, { query }, { timeout: 90000 })
+
+export const fetchLibraryGraphStats = () => http.get<GraphStats>('/training/graph/overview')
+
+export const fetchLibraryGraph = () =>
+  http.get<DocumentGraph>('/training/graph/overview', { includeGraph: true }, { timeout: 70000 })
+
 export const askDocument = (doc: TrainingDocument, question: string) =>
   http.post<DocumentAnswer>(`${base}/${doc.documentId}/ask`, { version: doc.version, question }, { timeout: 225000 })
 
 export const askLibrary = (question: string) =>
-  http.post<DocumentAnswer>(`${base}/ask`, { question }, { timeout: 225000 })
+  http.post<DocumentAnswer>(`${base}/ask`, { question }, { timeout: 270000 })
 
 export const askGraph = (question: string, doc?: TrainingDocument) =>
   http.post<GraphAnswer>('/training/graph/ask', { question, documentId: doc?.documentId, version: doc?.version }, { timeout: 240000 })

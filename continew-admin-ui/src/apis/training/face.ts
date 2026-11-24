@@ -23,6 +23,28 @@ export interface LivenessContext {
   username?: string
 }
 
+export interface FaceSessionProgress {
+  phase: string
+  done: boolean
+  action?: string
+  result?: string
+  livenessToken?: string
+}
+
+export const startFaceSession = (context: LivenessContext, tenant: string, signal: AbortSignal) =>
+  http.post<{ sessionId: string }>('/auth/face/liveness/session', context, {
+    headers: tenant ? { 'X-Tenant-Code': tenant } : {},
+    signal,
+    timeout: 25000,
+  })
+
+export const sendFaceFrame = (sessionId: string, context: LivenessContext, image: string, tenant: string, signal: AbortSignal) =>
+  http.post<FaceSessionProgress>('/auth/face/liveness/frame', { sessionId, context, image }, {
+    headers: tenant ? { 'X-Tenant-Code': tenant } : {},
+    signal,
+    timeout: 25000,
+  })
+
 export interface LivenessChallenge {
   challengeId: string
   actions: ('mouth' | 'down' | 'turn')[]

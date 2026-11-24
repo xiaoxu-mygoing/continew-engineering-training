@@ -7,16 +7,12 @@
       </div>
       <a-button @click="router.push('/user/profile')">个人中心</a-button>
     </header>
-    <div class="workspace-body">
-      <PrivateDocuments :key="userStore.userInfo.id" />
-      <aside><Notice /></aside>
-    </div>
+    <WorkspaceKnowledge :key="userStore.userInfo.id" />
   </div>
 </template>
 
 <script setup lang="ts">
-import PrivateDocuments from './components/PrivateDocuments.vue'
-import Notice from './components/Notice.vue'
+import WorkspaceKnowledge from './components/WorkspaceKnowledge.vue'
 import { useUserStore } from '@/stores'
 
 defineOptions({ name: 'Workplace' })
@@ -41,16 +37,5 @@ const router = useRouter()
 
   h1 { margin: 0; font-size: 22px; }
   p { margin: 6px 0 0; color: var(--color-text-3); }
-}
-
-.workspace-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 26%);
-  gap: 16px;
-  align-items: start;
-}
-
-@media (max-width: 900px) {
-  .workspace-body { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

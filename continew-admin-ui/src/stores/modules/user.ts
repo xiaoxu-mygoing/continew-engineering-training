@@ -89,10 +89,10 @@ const storeSetup = () => {
     })
   }
 
-  const faceLogin = async (req: FaceLoginReq, tenantCode?: string, signal?: AbortSignal) => {
+  const faceLogin = async (req: FaceLoginReq, tenantCode?: string) => {
     await withAuthLifecycleLock(async () => {
-      const res = await faceLoginApi({ ...req, clientId: import.meta.env.VITE_CLIENT_ID, authType: AuthTypeConstants.FACE }, tenantCode, signal)
-      signal?.throwIfAborted()
+      // 登录响应会写入会话 Cookie，开始后不随摄像头采集结束而取消。
+      const res = await faceLoginApi({ ...req, clientId: import.meta.env.VITE_CLIENT_ID, authType: AuthTypeConstants.FACE }, tenantCode)
       saveLoginState(res.data)
     })
   }

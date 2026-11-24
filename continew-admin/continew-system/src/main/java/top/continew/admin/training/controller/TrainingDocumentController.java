@@ -73,6 +73,15 @@ public class TrainingDocumentController {
         return questions.ask(null, 0, input.question());
     }
 
+    public record SearchRequest(String query) {
+    }
+
+    @PostMapping("/search")
+    public JsonNode search(@RequestBody SearchRequest input, HttpServletResponse response) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "private, no-store");
+        return questions.search(input.query());
+    }
+
     @PostMapping("/{id}/index")
     public void retry(@PathVariable String id, @RequestParam int version) {
         service.retry(id, version);

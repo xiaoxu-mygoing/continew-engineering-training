@@ -5,14 +5,13 @@ export type * from './type'
 
 const BASE_URL = '/auth'
 
-const login = (req: T.AccountLoginReq | T.PhoneLoginReq | T.EmailLoginReq | T.FaceLoginReq, tenantCode?: string, signal?: AbortSignal) => {
+const login = (req: T.AccountLoginReq | T.PhoneLoginReq | T.EmailLoginReq | T.FaceLoginReq, tenantCode?: string) => {
   const headers = {}
   if (tenantCode) {
     headers['X-Tenant-Code'] = tenantCode
   }
   return http.post<T.LoginResp>(`${BASE_URL}/login`, req, {
     headers,
-    signal,
   })
 }
 
@@ -22,8 +21,8 @@ export function accountLogin(req: T.AccountLoginReq, tenantCode?: string) {
 }
 
 /** @desc 人脸登录 */
-export function faceLogin(req: T.FaceLoginReq, tenantCode?: string, signal?: AbortSignal) {
-  return login(req, tenantCode, signal)
+export function faceLogin(req: T.FaceLoginReq, tenantCode?: string) {
+  return login(req, tenantCode)
 }
 
 /** @desc 邮箱登录 */

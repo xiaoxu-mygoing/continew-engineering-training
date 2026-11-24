@@ -26,13 +26,18 @@ import top.continew.starter.core.exception.BusinessException;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 调用仅通过标准输入接收数据的本地识别程序。
+ * 调用本地隔离进程或需要密钥认证的常驻人脸识别服务。
  *
  * @author 工程实训小组
  * @since 4.2.0
@@ -47,6 +52,27 @@ public class FaceRecognitionService {
     private String home;
     @Value("${TRAINING_FACE_WORKER:}")
     private String script;
+    @Value("${TRAINING_FACE_SERVICE_URL:}")
+    private String serviceUrl;
+    @Value("${FACE_SERVICE_API_KEY:}")
+    private String serviceKey;
+    private final HttpClient http =
+        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+
+    /**
+     * 调用组员的常驻逐帧服务。
+     * @param req 服务请求
+     * @param tenant 租户
+     * @return 服务结果
+     * @since 4.2.0
+     */
+    public JsonNode session(ObjectNode req, Long tenant) {
+        if (serviceUrl.isBlank()) {
+            throw new BusinessException("请先启动新版人脸服务");
+        }
+        req.put("tenant", tenant);
+        return execute(req, tenant, 20);
+    }
 
     /**
      * 执行指定账号的模板操作。
@@ -78,6 +104,9 @@ public class FaceRecognitionService {
     }
 
     private JsonNode execute(ObjectNode req, Long tenant, int timeoutSeconds) {
+        if (!serviceUrl.isBlank()) {
+            return remote(req, timeoutSeconds);
+        }
         if (tenant == null || home.isBlank() || script.isBlank()
             || !Files.isRegularFile(Path.of(script))) {
             throw new BusinessException("本地人脸识别服务未就绪，请使用密码登录");
@@ -115,6 +144,33 @@ public class FaceRecognitionService {
                 process.destroyForcibly();
             }
             workers.release();
+        }
+    }
+
+    private JsonNode remote(ObjectNode req, int timeoutSeconds) {
+        if (serviceKey.isBlank()) {
+            throw new BusinessException("人脸服务密钥未配置");
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(serviceUrl + "/worker"))
+                .timeout(Duration.ofSeconds(timeoutSeconds)).header("X-API-Key", serviceKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(req))).build();
+            HttpResponse<String> response =
+                http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new BusinessException("人脸服务暂时不可用");
+            }
+            JsonNode result = mapper.readTree(response.body());
+            if (!result.path("data").isObject()) {
+                throw new BusinessException(result.path("error").asText("人脸服务响应无效"));
+            }
+            return result.path("data");
+        } catch (IOException e) {
+            throw new BusinessException("无法连接人脸服务，请使用密码登录");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException("人脸验证已取消");
         }
     }
 }

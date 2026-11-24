@@ -18,7 +18,8 @@ from defusedxml import ElementTree
 from pypdf import PdfReader
 
 CHAT = "qwen2.5:3b"
-EMBED = "qwen3-embedding:0.6b"
+EMBED = "nomic-embed-text"
+DIMENSION = 768
 EMPTY = {"answer": "当前资料中未找到依据。", "sources": [], "nodes": [], "edges": [], "path": []}
 http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -113,7 +114,7 @@ def ollama(endpoint, **payload):
 
 def embeddings(texts):
     vectors = ollama("embed", model=EMBED, input=texts)["embeddings"]
-    if len(vectors) != len(texts) or any(len(vector) != 1024 for vector in vectors):
+    if len(vectors) != len(texts) or any(len(vector) != DIMENSION for vector in vectors):
         raise ValueError("图实体向量规格不匹配，请检查嵌入模型。")
     return vectors
 
@@ -151,6 +152,22 @@ def triples_by_model(rows):
     return found
 
 
+def embed_nodes(nodes, edges, source_key, target_key):
+    evidence = {}
+    for edge in edges:
+        for endpoint in (edge[source_key], edge[target_key]):
+            evidence.setdefault(endpoint, []).append(edge["evidence"])
+    for start in range(0, len(nodes), 16):
+        batch = nodes[start:start + 16]
+        texts = []
+        for node in batch:
+            context = " ".join(dict.fromkeys(evidence.get(node["id"], [])))
+            texts.append(f"{node['name']} {node['kind']} {context[:1200]}")
+        for node, vector in zip(batch, embeddings(texts)):
+            node["embedding"] = vector
+            node["embeddingModel"] = EMBED
+
+
 def index(req):
     rows = passages(base64.b64decode(req["file"], validate=True), req["fileName"])
     triples = triples_by_model(rows)
@@ -164,17 +181,7 @@ def index(req):
         edges.append(dict(item, id=len(edges) + 1, src=nodes[item["subject"]]["id"],
                           dst=nodes[item["object"]]["id"]))
     values = list(nodes.values())
-    for start in range(0, len(values), 16):
-        batch = values[start:start + 16]
-        texts = []
-        for node in batch:
-            context = " ".join(dict.fromkeys(edge["evidence"] for edge in edges
-                               if node["id"] in (edge["src"], edge["dst"])))
-            texts.append(node["name"] + " " + node["kind"] + " " + context[:1200])
-        vectors = embeddings(texts)
-        for node, vector in zip(batch, vectors):
-            node["embedding"] = vector
-            node["embeddingModel"] = EMBED
+    embed_nodes(values, edges, "src", "dst")
     # Replace one version atomically; readers see either the old graph or the new graph.
     cypher([
         statement("MATCH (n:TrainingEntity {documentId:$id, version:$version}) DETACH DELETE n",
@@ -193,7 +200,8 @@ def index(req):
 def load(doc, query_vector=None):
     params = {"id": doc["documentId"], "version": int(doc["version"])}
     result = cypher([
-        statement("MATCH (n:TrainingEntity {documentId:$id,version:$version}) RETURN n.id,n.name,n.kind", **params),
+        statement("""MATCH (n:TrainingEntity {documentId:$id,version:$version})
+                     RETURN n.id,n.name,n.kind,n.embeddingModel,size(n.embedding)""", **params),
         statement("""MATCH (a:TrainingEntity {documentId:$id,version:$version})-[r:TRAINING_RELATION]->(b)
                   RETURN r.id,a.id,b.id,r.predicate,r.chunk,r.page,r.evidence""", **params)])
     names = {r["row"][0]: {"name": r["row"][1], "kind": r["row"][2]} for r in result[0]["data"]}
@@ -201,13 +209,22 @@ def load(doc, query_vector=None):
              for r in result[1]["data"]]
     semantic_seeds = set()
     if query_vector is not None:
+        stale = [dict(id=row[0], name=row[1], kind=row[2]) for item in result[0]["data"]
+                 if (row := item["row"])[3:] != [EMBED, DIMENSION]]
+        if stale:
+            embed_nodes(stale, edges, "source", "target")
+            cypher([statement("""UNWIND $nodes AS row
+                MATCH (n:TrainingEntity {documentId:$id,version:$version,id:row.id,name:row.name,kind:row.kind})
+                WHERE coalesce(n.embeddingModel,'') <> $model OR coalesce(size(n.embedding),0) <> $dimension
+                SET n.embedding=row.embedding,n.embeddingModel=$model""",
+                **params, nodes=stale, model=EMBED, dimension=DIMENSION)])
         matches = cypher([statement("""
             MATCH (n:TrainingEntity {documentId:$id,version:$version,embeddingModel:$model})
-            WHERE n.embedding IS NOT NULL
+            WHERE size(n.embedding) = $dimension
             WITH n, vector.similarity.cosine(n.embedding,$vector) AS score
             WHERE score >= 0.72
             RETURN n.id ORDER BY score DESC LIMIT 3""",
-            **params, model=EMBED, vector=query_vector)])
+            **params, model=EMBED, dimension=DIMENSION, vector=query_vector)])
         semantic_seeds = {row["row"][0] for row in matches[0]["data"]}
     return dict(doc=doc, names=names, edges=edges, semantic_seeds=semantic_seeds)
 
@@ -320,7 +337,7 @@ def ask(req):
     question = req["question"].strip()
     if not 1 <= len(question) <= 500:
         raise ValueError("问题长度应为 1 至 500 字。")
-    query_vector = embeddings(["Instruct: Retrieve entities relevant to the question.\nQuery: " + question])[0]
+    query_vector = embeddings([question])[0]
     graphs = [load(doc, query_vector) for doc in req["documents"]]
     nodes, edges, path, evidence = subgraph(graphs, question)
     if not edges:
@@ -341,11 +358,33 @@ def document_graph(req):
     return {"nodes": nodes, "edges": edges}
 
 
+def library_graph(req):
+    documents = req["documents"]
+    if req["includeGraph"]:
+        nodes, edges = [], []
+        for doc in documents:
+            doc_nodes, doc_edges = graph_payload(load(doc))
+            nodes.extend(doc_nodes)
+            edges.extend(doc_edges)
+        return {"nodes": nodes, "edges": edges}
+
+    matched = """UNWIND $documents AS doc
+        MATCH (n:TrainingEntity {documentId:doc.documentId,version:doc.version}) """
+    counts = cypher([
+        statement(matched + "RETURN count(n),count(DISTINCT n.documentId)", documents=documents),
+        statement(matched + """MATCH (n)-[r:TRAINING_RELATION]->
+            (:TrainingEntity {documentId:doc.documentId,version:doc.version}) RETURN count(r)""", documents=documents),
+    ])
+    nodes, doc_count = counts[0]["data"][0]["row"]
+    return {"entityCount": nodes, "relationCount": counts[1]["data"][0]["row"][0], "documentCount": doc_count}
+
+
 if __name__ == "__main__":
     try:
         request = json.load(sys.stdin)
         operation = request["op"]
-        result = {"index": index, "ask": ask, "graph": document_graph, "delete": delete}[operation](request)
+        result = {"index": index, "ask": ask, "graph": document_graph, "delete": delete,
+                  "library_graph": library_graph}[operation](request)
         print(json.dumps({"data": result}, ensure_ascii=False))
     except (UnicodeError, zipfile.BadZipFile, KeyError):
         print(json.dumps({"error": "文件格式或编码无效，请检查文件后替换。"}, ensure_ascii=False))
